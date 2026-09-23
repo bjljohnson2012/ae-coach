@@ -167,3 +167,4 @@ AE Coach is ahead on coaching workflow, skill cards, director tools, and the app
 | `DEPLOY.md` | How the VPS was set up. Passwords in that file are placeholders. |
 | `prisma/schema.prisma` | The actual data model. |
 | `docs/CURRENT_STATE.md` | This file. |
+| `docs/FIELD_SCHOOL_MIGRATION.md` | Plan for moving coaching behavior and this shell into Field School. |

@@ -3,6 +3,7 @@
 Multi-tenant account-executive profiling, coaching, and skill tracking. The UI calls it Sales Coach AI. Hosted at `portal.benjohnson.ai`.
 
 - `docs/CURRENT_STATE.md` — what is actually built, as of 2026-09-23. Read this first.
+- `docs/FIELD_SCHOOL_MIGRATION.md` — plan for moving this product into Field School, including the Sales Coach AI shell.
 - `ARCHITECTURE.md` — system map and the main flows. The role table there is older than the schema.
 - `DEPLOY.md` — Hostinger VPS setup.
 - `prisma/schema.prisma` — the data model.
