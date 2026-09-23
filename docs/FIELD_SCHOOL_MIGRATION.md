@@ -9,15 +9,15 @@
 | Behavior and UI source | `AE _ Director Coach` (product name in the UI: Sales Coach AI) |
 | Repos | Implementation PRs land in `bjljohnson2012/field-school` under `app/`, except one write-freeze PR in `bjljohnson2012/ae-coach` |
 
-This document is the migration and integration plan. It is not the GitHub push of the AE Coach tree, and it is not a claim about the contents of production Postgres. The live database `aecoach` was not inspected.
+This document is the migration and integration plan. It is a selection, not a wholesale port of AE Coach onto Field School. Keep the coaching loop and the navy logged-in shell from AE Coach. Keep the course ladder, tenants, events, Field Pattern, and the public brand from Field School. Drop each product's worst mechanisms on purpose. The lists are in "What we keep and what we drop." It is not the GitHub push of the AE Coach tree, and it is not a claim about the contents of production Postgres. The live database `aecoach` was not inspected.
 
 ---
 
 ## Overview
 
-AE Coach (`portal.benjohnson.ai`) is the working sales-coaching product: director workflows, intake, skill cards, tasks, reviews, knowledge, and the navy app shell Ben wants to keep. Field School (`portal.fieldschool.ai`, code in `/Users/Owner/field-school/app`) is the product home going forward: course ladder, guest catalog, household and sales tenants, learning events, stances, and Field Pattern `fp-50-v1`. Neither set of behavior is optional. Two products is not an acceptable end state.
+AE Coach (`portal.benjohnson.ai`) is the working sales-coaching product: director workflows, intake, skill cards, tasks, reviews, knowledge, and the navy app shell Ben wants to keep. Field School (`portal.fieldschool.ai`, code in `/Users/Owner/field-school/app`) is the product home going forward: course ladder, guest catalog, household and sales tenants, learning events, stances, and Field Pattern `fp-50-v1`. The kept parts of both are required. The dropped parts are not. Two products is not an acceptable end state.
 
-The plan is a strangle inside `field-school/app`. Port behavior and screens onto Next.js 16, Drizzle, and Auth.js v5. Map rows into the campus schema. Do not carry Next.js 14, Prisma, or NextAuth v4 forward as a second runtime. AE Coach keeps serving `portal.benjohnson.ai` and stays the write path for coaching until a short freeze, a final import, and a Caddy upstream flip. Rollback is that upstream flip, not a schema merge.
+The plan is a strangle inside `field-school/app`. Bring the kept AE Coach behavior and the kept Field School behavior onto Next.js 16, Drizzle, and Auth.js v5. Map the kept rows into the campus schema. Do not carry Next.js 14, Prisma, or NextAuth v4 forward. Do not rebuild the catalog around the Grok Bot course. Dropped behavior is left behind. It is not ported and fixed later. AE Coach keeps serving `portal.benjohnson.ai` and stays the write path for coaching until a short freeze, a final import, and a Caddy upstream flip. Rollback is that upstream flip, not a schema merge.
 
 Ben confirmed on 2026-09-23 that the point of the move is to gain what AE Coach does not finish: Field School editing, admin controls, tenant structure, reporting, and business intelligence. Editing means the campus content and admin surfaces that already exist, plus the coaching authoring screens in this plan. It is not a new editor. Reporting starts, after cutover, as the existing Analyze explorer pointed at `learning_events` and `skill_states`. Test-environment coaching rows are imported. They are not dropped because they were test data. Household data and the platform org are not deleted to make room.
 
@@ -91,7 +91,7 @@ A second framework fork (Prisma app kept alive beside Drizzle) recreates that sp
 ### Goals
 
 1. One logged-in product in `field-school/app`. Coaching, the course ladder, household teaching, and sales learning share one shell, one auth session, one Postgres, and one AI module.
-2. Port AE Coach screens and rules. Map data. Do not rewrite coaching behavior while moving it.
+2. Port what "What we keep and what we drop" keeps, and leave the drop list behind. Coaching behavior on the keep list is moved as it works today. It is not redesigned for its own sake. Dropped behavior is not ported and then repaired. Map the kept data. Do not map the dropped mechanisms.
 3. Keep the course ladder (watch / field work / quiz), guest catalog, learning events, household org, sales org, stances, wards, and Field Pattern `fp-50-v1`.
 4. Keep personality and psychographic **routing** director-only unless `routeTo` is the learner. Keep coaching notes hidden from the learner unless a coach opts in. Keep wizard category labels off the client.
 5. Every skill-score change is a `learning_events` row plus a projection. No parallel score table that nothing else reads.
@@ -112,7 +112,77 @@ A second framework fork (Prisma app kept alive beside Drizzle) recreates that sp
 - Designing for unknown future customers beyond the tenancy rules. No new customer names are assumed.
 - Dual-writing coaching rows to both databases during the build.
 - A new data warehouse, a new chart vendor, or a full BI product. Reporting is a goal. The non-goal is a second analytics stack. The first surface is PR 21.
-- Retiring `/c/grok-bot`. Ben said on 2026-09-23 that the Grok Bot course will be removed. That removal is a separate Field School change. This migration does not add `grok-bot` to the sales allow-list, and the coaching shell does not depend on that course.
+- Retiring `/c/grok-bot`. Ben said on 2026-09-23 that the Grok Bot course will be removed. That removal is a separate Field School change. This migration does not add `grok-bot` to the sales allow-list, does not link the shell to it, and does not rebuild the catalog around it.
+
+---
+
+## What we keep and what we drop
+
+Ben's instruction on 2026-09-23: take the best of each product and lose the worst of each. This is not "port AE Coach wholesale." A behavior on the drop list is not built, not imported as a mechanism, and not scheduled as a later repair. Coaching behavior on the keep list is still ported as it works. Earlier decisions stay: import each AE org without guessing a merge into `sales`, keep the learner's own type chips, peer coaches do not see another director's type labels, Grok Bot is not added to sales, the hostname stays deferred with a 301 working assumption, and reporting is PR 21 after cutover.
+
+### Keep from AE Coach
+
+These are built and used. The screen or the rule is the reason they stay.
+
+| Keep | Where it lives today |
+|---|---|
+| Logged-in shell: navy bar, role nav, orange Tasks control, command palette, cards, skill tiles, wizard steps, drawers, density | `src/components/AppShell.tsx`, `CommandPalette.tsx`, `WizardStep.tsx`, `TasksNavBadge.tsx`. Tokens in `tailwind.config.ts` (`brand.navy` `#0B1F3A`, `brand.indigo` `#1F3C88`, `brand.orange` `#FF6A1A`, `surface.app` `#F5F7FA`) and `src/styles/globals.css` (`.btn-primary`, `.card`, `.h-page`). Ben prefers this over the Field School logged-in chrome. |
+| Intake with save/resume, and the skill card including the subject's own type chips | `src/app/(app)/ae/intake`, `src/app/(app)/ae/card/page.tsx`, `src/components/SkillCard.tsx` |
+| Tasks, coaching notes, plans, 1:1 prep, monthly reviews, compare | `src/app/(app)/tasks`, notes and plans on the person file, `src/app/(app)/director/reviews`, `src/app/(app)/director/compare` |
+| Knowledge repos, products, file upload with classify-then-confirm mapping | `src/app/(app)/knowledge`, `src/app/(app)/director/products`, `src/app/(app)/director/files` |
+| Question bank, improve drills, public token quiz | `src/app/(app)/director/questions`, `src/app/(app)/improve` (this screen calls `src/lib/improve.ts`, which writes `GameAttempt` and `UserGameStats`, so those tables stay), `src/app/quiz/[token]` and `src/app/api/quiz/[token]` |
+| Intercalated question order. Category labels never ship to the wizard client | `src/lib/intercalate.ts` |
+| `routeTo` so personality and leadership recommendations do not reach the learner. Notes hidden unless the coach opts in | `src/app/(app)/ae/card/page.tsx` filters `routeTo: "AE"` and `visibleToAe: true`. `src/lib/ai.ts` forces personality and leadership recommendations to `DIRECTOR_ONLY` |
+| VP access by walking the reporting chain, not by seeing every learner of lower rank | `getAccessibleAeIds` and `assertCanAccessAe` in `src/lib/tenancy.ts` (VP branch, about lines 130–142 and 170–176) |
+| One AI module and its prompts, called from Field School's single client. Not a second client | `src/lib/ai.ts`. Field School speech today is the separate fetch in `field-school/app/src/lib/pattern/stt.ts`. That fetch moves behind the one client |
+| The person file: one coach, one learner, tabs for the loop above | `src/app/(app)/director/ae/[id]/` |
+| Analyze as a reporting idea, rebuilt on Field School events and skill state. Not a second score database | `src/app/(app)/admin/analyze/page.tsx`. PR 21. It does not block cutover |
+
+### Drop from AE Coach
+
+Do not port these. Do not import them as behavior.
+
+| Drop | Why it is out |
+|---|---|
+| Next.js 14, Prisma, and `npx prisma db push --accept-data-loss` as the production schema path | `docker-compose.yml` boots the app with that command. Field School's checked-in Drizzle SQL replaces it. That command must never be aimed at the campus database |
+| NextAuth v4 | `src/lib/auth.ts`. Auth.js v5 in `field-school/app/src/auth.ts` is the only session |
+| Cron that fails open when `CRON_SECRET` is unset, and cron GETs that insert rows | Both handlers use `if (expected)` before checking the bearer (`src/app/api/cron/run-quiz-schedules/route.ts`, `run-weekly-briefs/route.ts`). The quiz route also does `export const POST = GET`. The replacement is one fail-closed POST. The old contract is not preserved |
+| The director org-wide fallback | `assertCanAccessAe` lines 180–182 return any AE whose org is in `getAccessibleOrgIds`, even when `directorId` does not match. `getAccessibleAeIds` for a director does not. The fallback is dropped. A coach opens a learner only through a `director` link |
+| Per-org `brandPalette` recoloring the shell | `BrandTheme` in `src/app/(app)/layout.tsx` applies `org.brandPalette`. Logo and org name may vary. Navy and orange do not. `suggestBrandPalettes` (`src/app/api/orgs/[id]/suggest-brand/route.ts`) is not ported |
+| Plaintext `smtpPass`, and mail that prints the message when SMTP is missing | `CompanyProfile.smtpPass` is plaintext in `prisma/schema.prisma`. `src/lib/email.ts` lines 109–114 `console.log` the recipient, subject, and body when SMTP is unset. `src/app/api/invite/route.ts` line 69 logs the invite URL. Do not import `smtpPass`. Do not log invite URLs. Mail uses Field School's existing Resend/SMTP path |
+| A second long-term app, a second database runtime, and a second logged-in shell | The strangle ends at cutover. Prisma does not stay beside Drizzle |
+| Client-store impersonation as how a coach acts as someone else | Field School staff "impersonate" is `impersonate()` in `field-school/app/src/lib/portal.ts`, which writes `impersonatorId` in the browser portal store. There is no server session swap in that app. Do not call that store a server path, and do not use it to open a coaching file. The navy shell does not render `ImpersonationBanner`. Operator impersonation, if used, stays the httpOnly server cookie already specified for `platform_admin`, which follows AE `impersonate_uid` in `tenancy.ts`. It is not the portal store |
+| `ARCHITECTURE.md`'s role table as the access model | That table predates `COMPANY_ADMIN` and `VP_SALES`. `src/lib/tenancy.ts` and this plan win |
+| Boot-time `db push`, `.bak` copies, and empty marker files | `AppShell.tsx.bak` and `AvatarCropper.tsx.bak` are not sources. The empty files `COMPANY_ADMIN`, `DIRECTOR`, and `VP_SALES` at the repo root are not product. Do not import them and do not port them |
+| `analyzeWebsite` and `RecheckCadence` | Website analyze is a route (`src/app/api/orgs/[id]/refresh-from-web/route.ts`) whose job is org branding, which this plan does not recolor. `RecheckCadence` is a Prisma model with no references under `src/`. No screen, no cron route. Do not add a table for it. Improve drills are not in this row: `/improve` uses them |
+
+### Keep from Field School
+
+| Keep | Where it lives today |
+|---|---|
+| Course method: watch the clip, do the field work, clear the quiz. Station pages stay station pages | `field-school/app/src/app/c/[courseSlug]/` and `s/[slug]/`. Progress is `reduceCourseProgress` in `app/src/lib/campus-runtime/events.ts` over `watch`, `quiz`, and `assignment` events. Do not fork a second station |
+| Tenants and stances | `organizations`, `memberships` unique on `(org_id, member_id)`, `wards`. Household and sales in `app/db/0004_tenants.sql` and `app/src/lib/campus-runtime/org.ts`. Events store `actor_stance` |
+| `learning_events` as the only score history. `skill_states` is the projection | `app/src/lib/db/schema.ts`, `app/src/app/api/skills/route.ts` |
+| Field Pattern `fp-50-v1` on `member_profiles`, separate from coaching psychographics | `app/src/lib/pattern/`, UI at `/pattern` |
+| Next.js 16, Drizzle, checked-in SQL, Auth.js v5 | `field-school/app`. Migrations `app/db/0001` through `0004`, plus `0005_coaching.sql` from this plan |
+| Public brand for signed-out pages and the marketing site: cream, Fraunces, seal | `app/src/app/globals.css` `:root` background `#f6f3ec`, Fraunces in `app/src/app/layout.tsx`, `marketing-site/`. Do not reskin the marketing site |
+| Org structure, admin, and editing that AE Coach does not finish. Reporting starts at PR 21 on events | Campus `/admin` and the course desk stay. Coaching authoring is the question bank, knowledge, products, and notes already in this plan. No new editor. No warehouse |
+| Guest access to a public catalog, without depending on Grok Bot | Signed-out catalog stays. `courseAllowedInOrg` does not gain `grok-bot`. Sales course link is `/o/sales/welcome` |
+
+### Drop from Field School
+
+These do not survive as the logged-in product.
+
+| Drop | Why it is out |
+|---|---|
+| Cream paper, Fraunces, IBM Plex, and shadcn as the logged-in chrome | `globals.css` `:root` and `.dark`, Fraunces and IBM Plex loaded in `layout.tsx`, `SiteHeader`. Signed-out pages may keep them. Signed-in app routes use the AE shell and override `--font-fraunces` and `--font-ibm-sans` only inside `[data-chrome="coach"]` |
+| The marketing header as coaching navigation | `SiteHeader` links Dashboard, Inbox, Tools, About. That is not the coach nav and not the learner nav |
+| Centering the product on the Grok Bot course | `publishedCourses` is only `grok-bot` (`app/src/lib/course/catalog.ts`). Ben said that course will be removed. This plan does not add it to sales and does not make the shell link to it. Removing the route is not a PR here. The catalog is not rebuilt around it |
+| The TanStack tree as a destination or a source of new features | `field-school/src`. `docs/campus-runtime/01-current-state.md` already says not to deploy that tree |
+| Using `isGuardianOf`'s admin short-circuit for coaching | `app/src/lib/pattern/profile.ts` lines 46–47 return true when `actor.stance === "admin"` with no ward row. Coaching access reads `wards` in the active org and does not call this helper. This migration does not change `/pattern`. A real household admin still hits that short-circuit on the Pattern page. An operator membership created by org switch is stance `learner` so it does not |
+| The client portal impersonation banner inside the coach shell | `layout.tsx` mounts `ImpersonationBanner`, which reads `usePortal()`. Marketing chrome may keep it. Coach chrome does not |
+| Operating two apps, two auth systems, and the stale university Caddy sample | After cutover, one app. `field-school/deploy/caddy.university.conf` still `reverse_proxy`s `university.benjohnson.ai` to `field-school-app`. The live host 301s to `https://portal.fieldschool.ai/`. Do not install the sample |
+| A second home URL | Household home is `/o/household/welcome`. Sales lesson is `/o/sales/welcome`. `getCourse("sales")` is undefined, so `/c/sales` 404s. There is no `/home` |
 
 ---
 
@@ -151,6 +221,8 @@ A second framework fork (Prisma app kept alive beside Drizzle) recreates that sp
 16. **Compare-directors type labels are not peer-visible.** Decided 2026-09-23. In an org, a `leader`, an org `admin`, the director themself, and that director's VP (`coaching_links.kind = vp`) may see the director's Enneagram, DISC, MBTI, and personality summary. A peer coach cannot. Learner routing rules are unchanged.
 
 17. **Hostname after cutover is deferred. The build does not wait.** On 2026-09-23 Ben said he will decide later what keeping `portal.benjohnson.ai` does. The working assumption, which cutover can ship without a further confirmation, is a 301 to `https://portal.fieldschool.ai` so there is one cookie jar. Do not flip `AUTH_URL` as part of this plan. Do not block PRs 1–20 on that choice.
+
+18. **Selection, not a wholesale port.** Decided 2026-09-23. The logged-in product is the AE Coach shell and coaching loop on the Field School stack, course ladder, tenants, events, and Field Pattern. Mechanisms on the drop list in "What we keep and what we drop" are not built. Kept coaching behavior is ported as it works, not rewritten for taste. Dropped behavior is not "ported, then fixed later."
 
 ---
 
@@ -1112,7 +1184,7 @@ PRs land in `bjljohnson2012/field-school`, directory `app/`, unless noted. Each 
 
 - **Depends on:** none.
 - **Files:** `app/src/app/globals.css`, `app/src/app/layout.tsx`, `app/src/components/chrome.tsx`, `app/src/components/app-shell.tsx` (static nav), `app/src/components/impersonation-banner.tsx` (marketing only).
-- **Change:** Load Inter and Space Grotesk. Register brand colors, radii, shadows, and `ease-brand` on `@theme`. Override `--font-fraunces` and `--font-ibm-sans` inside `[data-chrome="coach"]`, and reset every variable `.dark` sets. Move `SiteHeader`, `SiteFooter`, `ThemeScript`'s toggle, and the client `ImpersonationBanner` behind marketing chrome. Coach chrome forces light tokens and does not render that banner. `chrome.tsx` turns the shell on only when `COACHING_SHELL` is set and (`organizations.features.coachingShell` is true for the active org, or the viewer is staff). Default feature value is false, so a deploy with the env unset changes nothing. Proof: flag unset, signed-out `/` and `/c/grok-bot` stay cream and Fraunces.
+- **Change:** Load Inter and Space Grotesk. Register brand colors, radii, shadows, and `ease-brand` on `@theme`. Override `--font-fraunces` and `--font-ibm-sans` inside `[data-chrome="coach"]`, and reset every variable `.dark` sets. Move `SiteHeader`, `SiteFooter`, `ThemeScript`'s toggle, and the client `ImpersonationBanner` behind marketing chrome. Coach chrome forces light tokens and does not render that banner. Do not port `BrandTheme` or `brandPalette`. Do not add catalog content and do not make the shell depend on `/c/grok-bot`. The signed-out proof may still hit that URL while it exists. It is a chrome check, not a decision to keep the course. `chrome.tsx` turns the shell on only when `COACHING_SHELL` is set and (`organizations.features.coachingShell` is true for the active org, or the viewer is staff). Default feature value is false, so a deploy with the env unset changes nothing. Proof: flag unset, signed-out pages stay cream and Fraunces.
 
 ### PR 2 — Schema, access guard, operator seed, write gate
 
@@ -1136,7 +1208,7 @@ PRs land in `bjljohnson2012/field-school`, directory `app/`, unless noted. Each 
 
 - **Depends on:** none strictly. Land before PR 6.
 - **Files:** `app/src/lib/ai/client.ts`, `app/src/lib/ai/prompts/*`, `app/src/lib/pattern/stt.ts`.
-- **Change:** One client, two model tiers, `transcribe` used by STT. Prompt functions for the cutover list in the AI section, including hints, personality compare, article extract, article cleanup, option enhance, and bulk questions. No routes and no UI. `suggestBrandPalettes` and `analyzeWebsite` are not in this PR.
+- **Change:** One client, two model tiers, `transcribe` used by STT. Prompt functions for the cutover list in the AI section, including hints, personality compare, article extract, article cleanup, option enhance, and bulk questions. No routes and no UI. Do not port `suggestBrandPalettes` or `analyzeWebsite`. Those are on the drop list (`BrandTheme` and the website-refresh route). Do not add a `RecheckCadence` helper. Improve-drill prompts stay, because `/improve` is a real screen.
 
 ### PR 6 — Intake wizard and synthesis
 
@@ -1202,13 +1274,13 @@ PRs land in `bjljohnson2012/field-school`, directory `app/`, unless noted. Each 
 
 - **Depends on:** PR 2, PR 4, PR 13, PR 15.
 - **Files:** `app/src/auth.ts`, `app/scripts/import-aecoach.mjs`, `app/DEPLOY.md` (runbook only). No secret values.
-- **Change:** `authorize` accepts a JSON-store match or any `member_credentials` hash. Import inserts `aecoach` credentials without touching the JSON store, mints new invite tokens, maps leader tasks and visibility, copies `logoUrl`, skips `smtpPass` and `brandPalette`. It imports profiles, scores, notes, tasks, reviews, knowledge, products, and files, including test-environment rows. It creates one organization per source org. `app/scripts/aecoach-org-map.json` ships empty. A filled map is the only merge into the existing `sales` org. Colliding slugs become `{slug}-aecoach`. Household and `field-school` rows are not deleted. Dry-run rolls back. Rollback SQL from the Rollout section is in the runbook, behind `COACHING_ROLLBACK_CONFIRM`.
+- **Change:** `authorize` accepts a JSON-store match or any `member_credentials` hash. Import inserts `aecoach` credentials without touching the JSON store, mints new invite tokens, maps leader tasks and visibility, copies `logoUrl`, skips `smtpPass` and `brandPalette`. It imports profiles, scores, notes, tasks, reviews, knowledge, products, and files, including test-environment rows. It does not import `smtpPass`, `brandPalette`, `RecheckCadence`, `.bak` files, or the empty role marker files. Invite URLs are not logged. It creates one organization per source org. `app/scripts/aecoach-org-map.json` ships empty. A filled map is the only merge into the existing `sales` org. Colliding slugs become `{slug}-aecoach`. Household and `field-school` rows are not deleted. Dry-run rolls back. Rollback SQL from the Rollout section is in the runbook, behind `COACHING_ROLLBACK_CONFIRM`.
 
 ### PR 17 — Cron route
 
 - **Depends on:** PR 13, PR 16.
 - **Files:** `app/src/app/api/cron/coaching/route.ts`.
-- **Change:** `POST` only. 401 when `CRON_SECRET` is missing or wrong. `job` is `quizzes`, `briefs`, or `all`. No sidecar in this PR. Do not enable it until the token quiz is deployed.
+- **Change:** `POST` only. 401 when `CRON_SECRET` is missing or wrong. Do not copy the AE `if (expected)` skip, and do not expose a GET that inserts rows. `job` is `quizzes`, `briefs`, or `all`. No sidecar in this PR. Do not enable it until the token quiz is deployed.
 
 ### PR 18 — Account password page
 
