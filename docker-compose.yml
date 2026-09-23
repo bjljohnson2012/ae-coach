@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aecoach
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aecoach}
+      POSTGRES_DB: aecoach
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aecoach"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://aecoach:${POSTGRES_PASSWORD:-aecoach}@postgres:5432/aecoach?schema=public
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-https://portal.benjohnson.ai}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      GROK_API_KEY: ${GROK_API_KEY}
+      GROK_MODEL: ${GROK_MODEL:-grok-4-fast-reasoning}
+      GROK_MODEL_FAST: ${GROK_MODEL_FAST:-grok-3-mini}
+      GROK_BASE_URL: ${GROK_BASE_URL:-https://api.x.ai/v1}
+      APP_URL: ${APP_URL:-https://portal.benjohnson.ai}
+      CRON_SECRET: ${CRON_SECRET}
+    expose:
+      - "3000"
+    # v0: db push syncs schema directly (no migration files yet).
+    # When you start changing schemas in prod, generate proper migrations and switch this back to: npx prisma migrate deploy
+    command: sh -c "npx prisma db push --accept-data-loss && node server.js"
+
+  # Cron sidecar — hits the schedule runner hourly. Runs in the same docker
+  # network as the app, so it can call the internal hostname `app:3000`.
+  cron:
+    image: alpine:3.20
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      CRON_SECRET: ${CRON_SECRET}
+    command: >
+      sh -c "
+        apk add --no-cache curl > /dev/null;
+        while true; do
+          echo \"[cron] $$(date -u +%Y-%m-%dT%H:%M:%SZ) running quiz-schedules\";
+          curl -sS -X POST \
+            -H \"Authorization: Bearer $$CRON_SECRET\" \
+            http://app:3000/api/cron/run-quiz-schedules || echo \"[cron] quiz-schedules failed\";
+          echo;
+          echo \"[cron] $$(date -u +%Y-%m-%dT%H:%M:%SZ) running weekly-briefs\";
+          curl -sS \
+            -H \"Authorization: Bearer $$CRON_SECRET\" \
+            http://app:3000/api/cron/run-weekly-briefs || echo \"[cron] weekly-briefs failed\";
+          echo;
+          sleep 3600;
+        done
+      "
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  uploads:

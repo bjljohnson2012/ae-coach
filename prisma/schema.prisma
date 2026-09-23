@@ -1,0 +1,1278 @@
+// Prisma schema for AE Director Coach (v2)
+// Multi-tenant via org_id. All tenant-scoped queries must filter by org_id (see src/lib/tenancy.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum Role {
+  ORG_ADMIN        // Ben — super admin across all orgs
+  COMPANY_ADMIN    // per-org admin
+  VP_SALES         // manages directors
+  DIRECTOR         // manages AEs
+  AE
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+}
+
+// Org lifecycle. ACTIVE is the default. INACTIVE = paused (paying customer
+// in transit, billing issue, etc., reversible). OFFBOARDED = customer left
+// the platform — login disabled for everyone in the org but data is retained
+// for export and audit purposes until the admin deletes.
+enum OrgStatus {
+  ACTIVE
+  INACTIVE
+  OFFBOARDED
+}
+
+enum QuestionCategory {
+  SALES_STYLE
+  COMMUNICATION
+  PERSONALITY
+  ENNEAGRAM
+  DISC
+  MBTI
+  MOTIVATION
+  RESILIENCE
+  PRODUCT_KNOWLEDGE      // requires productId
+  LEADERSHIP             // for director intake
+  DIRECTOR_MONTHLY_REVIEW // questions a director answers monthly about each AE
+}
+
+enum QuestionType {
+  LONG_FORM
+  MULTIPLE_CHOICE
+  LIKERT
+  SLIDER
+}
+
+enum SkillCategory {
+  DISCOVERY
+  OBJECTION_HANDLING
+  CLOSING
+  COMMUNICATION
+  RESILIENCE
+  PRODUCT_MASTERY
+  LEADERSHIP             // director-only
+  FORECASTING            // director-only
+}
+
+enum ScoreSource {
+  AI
+  DIRECTOR_OVERRIDE
+  AE_SELF
+  MONTHLY_REVIEW         // delta from director's monthly review
+}
+
+// Status for any AI-generated artifact that runs in the background.
+//   GENERATING — kicked off, AI working
+//   READY      — completed successfully
+//   FAILED     — AI errored; check errorMessage
+enum AiJobStatus {
+  GENERATING
+  READY
+  FAILED
+}
+
+enum FileKind {
+  PHOTO
+  AE_PREP_DOC
+  COACHING_DOC
+  PROFILE_ASSET
+  PRODUCT_REFERENCE
+  PERSONALITY_NOTE
+  GENERAL
+  OTHER
+}
+
+enum FileVisibility {
+  AE_ONLY
+  DIRECTOR_ONLY
+  BOTH
+}
+
+enum FileUpdateIntent {
+  ADD_TO_COACHING_LOG
+  UPDATE_PROFILE
+  REFERENCE_ONLY
+}
+
+enum RecommendationSource {
+  AI
+  DIRECTOR
+  AE_SELF
+  MONTHLY_REVIEW
+}
+
+enum RecommendationCategory {
+  SALES_SKILL
+  PRODUCT_KNOWLEDGE
+  PERSONALITY
+  LEADERSHIP
+  HEALTH                  // wellbeing recs
+  GENERAL
+}
+
+enum RecommendationRouteTo {
+  AE                      // visible to AE
+  DIRECTOR_ONLY           // never reaches AE (e.g., personality)
+}
+
+enum RecommendationChannel {
+  TASK                    // becomes a Task
+  EMAIL                   // queued for email send
+  NOTE                    // appears in director's pre-1:1 brief
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum AnswerSetStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum KnowledgeRepoKind {
+  PRODUCT
+  SALES_SKILL
+  PERSONALITY
+  LEADERSHIP
+  CUSTOM           // org-defined library
+}
+
+enum DirectorReviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+enum AuditAction {
+  USER_CREATED
+  USER_INVITED
+  USER_ACTIVATED
+  USER_MOVED_ORG
+  USER_ROLE_CHANGED
+  USER_EMAIL_CHANGED
+  PROFILE_SYNTHESIZED
+  SCORE_OVERRIDDEN
+  FILE_UPLOADED
+  FILE_MAPPED
+  KNOWLEDGE_ARTICLE_CREATED
+  KNOWLEDGE_ARTICLE_APPROVED
+  KNOWLEDGE_ARTICLE_REJECTED
+  QUESTION_CREATED
+  QUESTION_AI_GENERATED
+  ORG_REFRESHED
+  // v3.31 — org lifecycle + data export
+  ORG_DEACTIVATED
+  ORG_REACTIVATED
+  ORG_OFFBOARDED
+  ORG_DATA_EXPORTED
+}
+
+enum EmailChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ArticleStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AdHocQuizStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  EXPIRED
+  CANCELLED
+}
+
+enum AdHocQuizKind {
+  SKILL_CHECK_IN     // ad-hoc, targeting specific skill gaps
+  RECURRING          // periodic re-check (weekly, monthly)
+  CUSTOM             // director picked questions manually
+}
+
+enum QuizCadence {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+enum RetakeRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+  CANCELLED
+}
+
+// ============================================================
+// CORE TENANCY
+// ============================================================
+
+model Org {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  brandColor    String?  @map("brand_color")           // legacy single primary
+  brandPalette  Json?    @map("brand_palette")         // {primary, secondary, accent, neutral, success}
+  brandLogoUrl  String?  @map("brand_logo_url")
+  websiteUrl    String?  @map("website_url")           // for AI brand analysis
+  // Per-org AI model selection. ORG_ADMIN-only edit; null = use platform default.
+  // Valid values: grok-4-latest | grok-4-fast-reasoning | grok-3 | grok-3-mini
+  aiModel       String?  @map("ai_model")
+  // Lifecycle. ACTIVE by default. INACTIVE pauses (recoverable). OFFBOARDED is
+  // the customer-departed state: logins disabled but data retained for export.
+  status        OrgStatus @default(ACTIVE)
+  offboardedAt  DateTime? @map("offboarded_at")
+  offboardedById String?  @map("offboarded_by_id")
+  offboardReason String?  @db.Text @map("offboard_reason")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
+
+  users               User[]
+  companyProfile      CompanyProfile?
+  questions           Question[]
+  aeProfiles          AeProfile[]
+  directorProfiles    DirectorProfile[]
+  files               FileAsset[]
+  fileMappings        FileMapping[]
+  directorAssignments DirectorAssignment[]
+  products            Product[]
+  knowledgeRepos      KnowledgeRepository[]
+  knowledgeArticles   KnowledgeArticle[]
+  auditLogs           AuditLog[]
+  skillBenchmarks     OrgSkillBenchmark[]
+
+  @@map("orgs")
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  name          String
+  passwordHash  String?    @map("password_hash")
+  imageUrl      String?    @map("image_url")
+  role          Role
+  status        UserStatus @default(PENDING)
+  orgId         String     @map("org_id")
+  vpId          String?    @map("vp_id")  // for DIRECTOR — which VP they report to
+  invitedById   String?    @map("invited_by_id")
+  invitedAt     DateTime?  @map("invited_at")
+  passwordSetAt DateTime?  @map("password_set_at")
+  lastLoginAt   DateTime?  @map("last_login_at")
+  // Opt-in to a weekly improvement-tip email tailored to the user's growth
+  // areas. Default off — users explicitly subscribe via /account.
+  weeklyBriefSubscribed Boolean   @default(false) @map("weekly_brief_subscribed")
+  weeklyBriefLastSentAt DateTime? @map("weekly_brief_last_sent_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  org                  Org                  @relation(fields: [orgId], references: [id])
+  vp                   User?                @relation("VpReports", fields: [vpId], references: [id])
+  directReports        User[]               @relation("VpReports")
+  invitedBy            User?                @relation("UserInvitedBy", fields: [invitedById], references: [id])
+  invitees             User[]               @relation("UserInvitedBy")
+  inviteTokens         InviteToken[]
+  aeProfile            AeProfile?           @relation("UserAeProfile")
+  directorProfile      DirectorProfile?     @relation("UserDirectorProfile")
+  directedAes          AeProfile[]          @relation("DirectorOfAe")
+  coachingNotes        CoachingNote[]       @relation("DirectorOfNote")
+  prepDocs             PrepDoc[]            @relation("DirectorOfPrep")
+  scoreOverrides       SkillScore[]         @relation("ScoreUpdater")
+  filesUploaded        FileAsset[]          @relation("FileOwner")
+  fileMappingsByMe     FileMapping[]        @relation("MappedBy")
+  tasksCreated         Task[]               @relation("TaskCreator")
+  tasksAssigned        Task[]               @relation("TaskAssignee")
+  directorAssignments  DirectorAssignment[] @relation("DirectorAssignmentDirector")
+  directorReviewsAsDir DirectorReview[]     @relation("ReviewDirector")
+  questionsAuthored    Question[]           @relation("QuestionAuthor")
+  knowledgeAuthored    KnowledgeArticle[]   @relation("KnowledgeAuthor")
+  auditEvents          AuditLog[]           @relation("AuditActor")
+  oneOnOnePreps        OneOnOnePrep[]       @relation("OneOnOnePrepDirector")
+  adHocQuizzesSent     AdHocQuiz[]          @relation("AdHocQuizSender")
+  recurringQuizSchedulesCreated RecurringQuizSchedule[] @relation("RecurringQuizCreator")
+  retakeRequests       QuizRetakeRequest[]  @relation("RetakeRequester")
+  retakeDecisions      QuizRetakeRequest[]  @relation("RetakeDecider")
+  coachingPlansBuilt   CoachingPlan[]       @relation("CoachingPlanBuilder")
+  benchmarkFiles       OrgSkillBenchmarkFile[]
+  gameStats            UserGameStats?
+  gameAttempts         GameAttempt[]
+
+  @@index([orgId])
+  @@index([role])
+  @@map("users")
+}
+
+model InviteToken {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("invite_tokens")
+}
+
+model DirectorAssignment {
+  id          String   @id @default(cuid())
+  directorId  String   @map("director_id")
+  orgId       String   @map("org_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  director User @relation("DirectorAssignmentDirector", fields: [directorId], references: [id], onDelete: Cascade)
+  org      Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([directorId, orgId])
+  @@map("director_assignments")
+}
+
+// ============================================================
+// COMPANY CONFIG + PRODUCTS
+// ============================================================
+
+model CompanyProfile {
+  id                String   @id @default(cuid())
+  orgId             String   @unique @map("org_id")
+  requiredSkills    Json     @default("[]") @map("required_skills")
+  values            Json     @default("[]")
+  salesMethodology  String?  @map("sales_methodology")
+  intakeConfig      Json     @default("{}") @map("intake_config")
+
+  // Per-org SMTP (overrides global env). Set by COMPANY_ADMIN/ORG_ADMIN via UI.
+  // NOTE: smtpPass stored plaintext for v0. Migrate to encrypted-at-rest before
+  // any customer with sensitive credentials goes live.
+  smtpHost   String?  @map("smtp_host")
+  smtpPort   Int?     @default(587) @map("smtp_port")
+  smtpSecure Boolean  @default(false) @map("smtp_secure")
+  smtpUser   String?  @map("smtp_user")
+  smtpPass   String?  @map("smtp_pass")
+  smtpFrom   String?  @map("smtp_from")
+
+  // v3.37 — gamified self-coaching. Each org can rebrand the action button
+  // ("Improve", "Get Better", "Level Up", "Sharpen") to fit their culture.
+  // Default null → UI falls back to "Improve".
+  improveButtonLabel String? @map("improve_button_label")
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
+
+  org Org @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("company_profiles")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  orgId       String   @map("org_id")
+  name        String
+  slug        String
+  summary     String?  @db.Text
+  audience    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org       Org        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  questions Question[]
+  articles  KnowledgeArticle[]
+
+  @@unique([orgId, slug])
+  @@index([orgId, active])
+  @@map("products")
+}
+
+// ============================================================
+// INTAKE WIZARD
+// ============================================================
+
+model Question {
+  id             String           @id @default(cuid())
+  orgId          String?          @map("org_id") // null = global
+  productId      String?          @map("product_id") // for PRODUCT_KNOWLEDGE
+  category       QuestionCategory
+  questionType   QuestionType     @map("question_type")
+  text           String           @db.Text
+  optionsJson    Json?            @map("options_json")
+  tagsJson       Json             @default("[]") @map("tags_json")
+  weight         Float            @default(1.0)
+  orderHint      Int              @default(0) @map("order_hint")
+  active         Boolean          @default(true)
+  aiGenerated    Boolean          @default(false) @map("ai_generated")
+  originalText   String?          @db.Text @map("original_text") // pre-edit version
+  authorUserId   String?          @map("author_user_id")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  org     Org?     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  author  User?    @relation("QuestionAuthor", fields: [authorUserId], references: [id])
+  answers Answer[]
+  directorReviewAnswers DirectorReviewAnswer[]
+
+  @@index([orgId, category, active])
+  @@index([productId])
+  @@map("questions")
+}
+
+model AnswerSet {
+  id            String          @id @default(cuid())
+  aeProfileId   String?         @map("ae_profile_id")
+  directorProfileId String?     @map("director_profile_id")
+  version       Int             @default(1)
+  status        AnswerSetStatus @default(IN_PROGRESS)
+  // Save/resume: index of last-seen question in the intercalated order
+  resumeIndex   Int             @default(0) @map("resume_index")
+  // Cached intercalated question id order — built once on session start
+  questionOrder Json            @default("[]") @map("question_order")
+  startedAt     DateTime        @default(now()) @map("started_at")
+  completedAt   DateTime?       @map("completed_at")
+
+  aeProfile       AeProfile?       @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  directorProfile DirectorProfile? @relation(fields: [directorProfileId], references: [id], onDelete: Cascade)
+  answers         Answer[]
+  adHocQuiz       AdHocQuiz?
+  retakeRequests  QuizRetakeRequest[] @relation("RetakeAnswerSetTarget")
+
+  @@index([aeProfileId, version])
+  @@index([directorProfileId, version])
+  @@map("answer_sets")
+}
+
+model Answer {
+  id           String   @id @default(cuid())
+  answerSetId  String   @map("answer_set_id")
+  questionId   String   @map("question_id")
+  value        Json
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  answerSet AnswerSet @relation(fields: [answerSetId], references: [id], onDelete: Cascade)
+  question  Question  @relation(fields: [questionId], references: [id])
+
+  @@unique([answerSetId, questionId])
+  @@index([answerSetId])
+  @@map("answers")
+}
+
+// ============================================================
+// AE PROFILE & SKILL CARD
+// ============================================================
+
+model AeProfile {
+  id                       String    @id @default(cuid())
+  userId                   String    @unique @map("user_id")
+  orgId                    String    @map("org_id")
+  directorId               String?   @map("director_id")
+  hireDate                 DateTime? @map("hire_date")
+  photoUrl                 String?   @map("photo_url")
+  headline                 String?
+  bioShort                 String?   @map("bio_short")
+
+  personalitySummary       String?   @db.Text @map("personality_summary")
+  salesStyleSummary        String?   @db.Text @map("sales_style_summary")
+  communicationSummary     String?   @db.Text @map("communication_summary")
+  motivations              Json      @default("[]")
+  strengthsJson            Json      @default("[]") @map("strengths_json")
+  weaknessesJson           Json      @default("[]") @map("weaknesses_json")
+  enneagramType            String?   @map("enneagram_type")
+  discProfile              String?   @map("disc_profile")
+  mbtiType                 String?   @map("mbti_type")
+  lastSynthesizedAt        DateTime? @map("last_synthesized_at")
+  // v3.37.5 — async synthesis tracking. When the user submits intake we set
+  // GENERATING immediately + return; the AI runs background. Dashboard polls
+  // and shows a status banner until READY (or shows error + retry on FAILED).
+  synthesisStatus          AiJobStatus? @map("synthesis_status")
+  synthesisError           String?   @db.Text @map("synthesis_error")
+  synthesisStartedAt       DateTime? @map("synthesis_started_at")
+  // AI-generated leader-only coaching hints, keyed by profile field
+  // ({ personality, salesStyle, communication, motivations, strengths, weaknesses } → string[])
+  coachingHintsJson        Json?     @map("coaching_hints_json")
+  coachingHintsAt          DateTime? @map("coaching_hints_at")
+  // Holistic AI reasoning — "how I think about this person." Shown at top of Reasoning tab.
+  reasoningSummary         String?   @db.Text @map("reasoning_summary")
+  reasoningSummaryAt       DateTime? @map("reasoning_summary_at")
+
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  user             User              @relation("UserAeProfile", fields: [userId], references: [id], onDelete: Cascade)
+  org              Org               @relation(fields: [orgId], references: [id])
+  director         User?             @relation("DirectorOfAe", fields: [directorId], references: [id])
+  answerSets       AnswerSet[]
+  skillScores      SkillScore[]
+  skillScoreHistory SkillScoreHistory[]
+  coachingNotes    CoachingNote[]
+  prepDocs         PrepDoc[]
+  plans            Plan[]
+  recommendations  Recommendation[]
+  tasks            Task[]
+  files            FileAsset[]
+  fileMappings     FileMapping[]
+  recheckCadences  RecheckCadence[]
+  directorReviews  DirectorReview[]
+  quarterlyPerformance QuarterlyPerformance[]
+  oneOnOnePreps    OneOnOnePrep[]
+  coachingPlans    CoachingPlan[]
+  adHocQuizzes     AdHocQuiz[]
+  recurringQuizSchedule RecurringQuizSchedule?
+
+  @@index([orgId])
+  @@index([directorId])
+  @@map("ae_profiles")
+}
+
+model DirectorProfile {
+  id                    String    @id @default(cuid())
+  userId                String    @unique @map("user_id")
+  orgId                 String    @map("org_id")
+  photoUrl              String?   @map("photo_url")
+  headline              String?
+  bioShort              String?   @map("bio_short")
+
+  personalitySummary    String?   @db.Text @map("personality_summary")
+  leadershipSummary     String?   @db.Text @map("leadership_summary")
+  forecastingSummary    String?   @db.Text @map("forecasting_summary")
+  motivations           Json      @default("[]")
+  strengthsJson         Json      @default("[]") @map("strengths_json")
+  weaknessesJson        Json      @default("[]") @map("weaknesses_json")
+  enneagramType         String?   @map("enneagram_type")
+  discProfile           String?   @map("disc_profile")
+  mbtiType              String?   @map("mbti_type")
+  lastSynthesizedAt     DateTime? @map("last_synthesized_at")
+  // v3.37.5 — async synthesis tracking. Submit returns immediately and
+  // AI runs background; dashboard polls until READY.
+  synthesisStatus       AiJobStatus? @map("synthesis_status")
+  synthesisError        String?   @db.Text @map("synthesis_error")
+  synthesisStartedAt    DateTime? @map("synthesis_started_at")
+  coachingHintsJson     Json?     @map("coaching_hints_json")
+  coachingHintsAt       DateTime? @map("coaching_hints_at")
+  reasoningSummary      String?   @db.Text @map("reasoning_summary")
+  reasoningSummaryAt    DateTime? @map("reasoning_summary_at")
+
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  user        User        @relation("UserDirectorProfile", fields: [userId], references: [id], onDelete: Cascade)
+  org         Org         @relation(fields: [orgId], references: [id])
+  answerSets  AnswerSet[]
+  skillScores DirectorSkillScore[]
+  oneOnOnePreps OneOnOnePrep[]
+  coachingPlans CoachingPlan[]
+  adHocQuizzes  AdHocQuiz[]
+  recurringQuizSchedule RecurringQuizSchedule?
+
+  @@index([orgId])
+  @@map("director_profiles")
+}
+
+model SkillScore {
+  id                  String        @id @default(cuid())
+  aeProfileId         String        @map("ae_profile_id")
+  category            SkillCategory
+  score               Int
+  level               Int
+  notes               String?       @db.Text
+  source              ScoreSource
+  lastUpdatedByUserId String?       @map("last_updated_by_user_id")
+  lastUpdatedAt       DateTime      @default(now()) @map("last_updated_at")
+  createdAt           DateTime      @default(now()) @map("created_at")
+
+  aeProfile     AeProfile @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  lastUpdatedBy User?     @relation("ScoreUpdater", fields: [lastUpdatedByUserId], references: [id])
+
+  @@unique([aeProfileId, category])
+  @@index([aeProfileId])
+  @@map("skill_scores")
+}
+
+// Director-only skill scores (LEADERSHIP, FORECASTING, etc.)
+model DirectorSkillScore {
+  id                String        @id @default(cuid())
+  directorProfileId String        @map("director_profile_id")
+  category          SkillCategory
+  score             Int
+  level             Int
+  notes             String?
+  source            ScoreSource
+  lastUpdatedAt     DateTime      @default(now()) @map("last_updated_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+
+  directorProfile DirectorProfile @relation(fields: [directorProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([directorProfileId, category])
+  @@map("director_skill_scores")
+}
+
+model SkillScoreHistory {
+  id           String        @id @default(cuid())
+  aeProfileId  String        @map("ae_profile_id")
+  category     SkillCategory
+  score        Int
+  source       ScoreSource
+  recordedAt   DateTime      @default(now()) @map("recorded_at")
+
+  aeProfile AeProfile @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+
+  @@index([aeProfileId, category, recordedAt])
+  @@map("skill_score_history")
+}
+
+// ============================================================
+// COACHING
+// ============================================================
+
+model CoachingNote {
+  id           String   @id @default(cuid())
+  aeProfileId  String   @map("ae_profile_id")
+  directorId   String   @map("director_id")
+  content      String   @db.Text
+  visibleToAe  Boolean  @default(false) @map("visible_to_ae")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  aeProfile AeProfile @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  director  User      @relation("DirectorOfNote", fields: [directorId], references: [id])
+
+  @@index([aeProfileId])
+  @@map("coaching_notes")
+}
+
+model PrepDoc {
+  id           String    @id @default(cuid())
+  aeProfileId  String    @map("ae_profile_id")
+  directorId   String    @map("director_id")
+  weekOf       DateTime  @map("week_of")
+  title        String?
+  content      String?   @db.Text
+  fileId       String?   @unique @map("file_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  aeProfile         AeProfile          @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  director          User               @relation("DirectorOfPrep", fields: [directorId], references: [id])
+  file              FileAsset?         @relation(fields: [fileId], references: [id])
+  crossRefAnalyses  CrossRefAnalysis[]
+
+  @@unique([aeProfileId, weekOf])
+  @@index([aeProfileId])
+  @@map("prep_docs")
+}
+
+model CrossRefAnalysis {
+  id                  String   @id @default(cuid())
+  prepDocId           String   @map("prep_doc_id")
+  aeProfileId         String   @map("ae_profile_id")
+  generatedAt         DateTime @default(now()) @map("generated_at")
+  recommendationsJson Json     @default("[]") @map("recommendations_json")
+  talkingPointsJson   Json     @default("[]") @map("talking_points_json")
+  rawOutput           String?  @db.Text @map("raw_output")
+
+  prepDoc PrepDoc @relation(fields: [prepDocId], references: [id], onDelete: Cascade)
+
+  @@index([prepDocId])
+  @@map("cross_ref_analyses")
+}
+
+model Plan {
+  id              String    @id @default(cuid())
+  aeProfileId     String    @map("ae_profile_id")
+  year            Int
+  quarter         Int
+  focusAreasJson  Json      @default("[]") @map("focus_areas_json")
+  milestonesJson  Json      @default("[]") @map("milestones_json")
+  status          String    @default("ACTIVE")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  aeProfile AeProfile @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([aeProfileId, year, quarter])
+  @@map("plans")
+}
+
+model Recommendation {
+  id           String                  @id @default(cuid())
+  aeProfileId  String                  @map("ae_profile_id")
+  source       RecommendationSource
+  category     RecommendationCategory  @default(GENERAL)
+  routeTo      RecommendationRouteTo   @default(AE) @map("route_to")
+  channel      RecommendationChannel   @default(NOTE)
+  title        String
+  description  String                  @db.Text
+  status       String                  @default("OPEN")
+  // For attribution: link to the article(s) that supported this rec
+  sourceArticleIds Json                @default("[]") @map("source_article_ids")
+  createdAt    DateTime                @default(now()) @map("created_at")
+  updatedAt    DateTime                @updatedAt @map("updated_at")
+
+  aeProfile AeProfile @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+
+  @@index([aeProfileId, routeTo])
+  @@index([category])
+  @@map("recommendations")
+}
+
+model Task {
+  id              String     @id @default(cuid())
+  // Polymorphic target: at least one of aeProfileId / assigneeUserId must be set.
+  // aeProfileId is preserved for back-compat with existing tasks. New tasks
+  // assigned to leaders (directors, VPs, admins) use assigneeUserId only.
+  aeProfileId     String?    @map("ae_profile_id")
+  assigneeUserId  String?    @map("assignee_user_id")
+  createdByUserId String     @map("created_by_user_id")
+  title           String
+  description     String?    @db.Text
+  status          TaskStatus @default(OPEN)
+  dueAt           DateTime?  @map("due_at")
+  completedAt     DateTime?  @map("completed_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  aeProfile AeProfile? @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  assignee  User?      @relation("TaskAssignee", fields: [assigneeUserId], references: [id], onDelete: Cascade)
+  createdBy User       @relation("TaskCreator", fields: [createdByUserId], references: [id])
+
+  @@index([aeProfileId, status])
+  @@index([assigneeUserId, status])
+  @@map("tasks")
+}
+
+model RecheckCadence {
+  id            String    @id @default(cuid())
+  aeProfileId   String    @map("ae_profile_id")
+  dueAt         DateTime  @map("due_at")
+  completedAt   DateTime? @map("completed_at")
+  answerSetId   String?   @map("answer_set_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  aeProfile AeProfile @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+
+  @@index([aeProfileId, dueAt])
+  @@map("recheck_cadences")
+}
+
+// Quarterly performance vs quota — for the Performance tab on AE profiles.
+model QuarterlyPerformance {
+  id              String    @id @default(cuid())
+  aeProfileId     String    @map("ae_profile_id")
+  year            Int
+  quarter         Int       // 1-4
+  quotaCents      Int?      @map("quota_cents")
+  attainedCents   Int?      @map("attained_cents")
+  newLogos        Int?      @map("new_logos")
+  meetingsHeld   Int?      @map("meetings_held")
+  notes           String?   @db.Text
+  recordedByUserId String?  @map("recorded_by_user_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  aeProfile AeProfile @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([aeProfileId, year, quarter])
+  @@index([aeProfileId, year, quarter])
+  @@map("quarterly_performance")
+}
+
+// Quiz retake requests — an AE asks their leader to let them re-take a completed
+// quiz or their original intake (their first answers might not reflect them).
+// Polymorphic target: exactly one of adHocQuizId / answerSetId set.
+model QuizRetakeRequest {
+  id                  String              @id @default(cuid())
+  requesterUserId     String              @map("requester_user_id")
+  adHocQuizId         String?             @map("ad_hoc_quiz_id")
+  answerSetId         String?             @map("answer_set_id")
+  reason              String?             @db.Text
+  status              RetakeRequestStatus @default(PENDING)
+  decidedByUserId     String?             @map("decided_by_user_id")
+  decidedAt           DateTime?           @map("decided_at")
+  decisionNote        String?             @db.Text @map("decision_note")
+  approvedAdHocQuizId String?             @map("approved_ad_hoc_quiz_id")
+  createdAt           DateTime            @default(now()) @map("created_at")
+
+  requester User       @relation("RetakeRequester", fields: [requesterUserId], references: [id], onDelete: Cascade)
+  decidedBy User?      @relation("RetakeDecider", fields: [decidedByUserId], references: [id])
+  adHocQuiz AdHocQuiz? @relation("RetakeQuizTarget", fields: [adHocQuizId], references: [id], onDelete: Cascade)
+  answerSet AnswerSet? @relation("RetakeAnswerSetTarget", fields: [answerSetId], references: [id], onDelete: Cascade)
+
+  @@index([requesterUserId, status])
+  @@index([status, createdAt])
+  @@map("quiz_retake_requests")
+}
+
+// Recurring quiz schedule — toggled per profile. The cron runner finds active
+// schedules whose nextRunAt has passed, builds a fresh AdHocQuiz tailored to
+// the AE's current weakest skills, sends email, and advances nextRunAt.
+//
+// One schedule per profile (enforced via @@unique on the polymorphic FK).
+model RecurringQuizSchedule {
+  id                String       @id @default(cuid())
+  aeProfileId       String?      @unique @map("ae_profile_id")
+  directorProfileId String?      @unique @map("director_profile_id")
+  createdByUserId   String       @map("created_by_user_id")
+  active            Boolean      @default(true)
+  cadence           QuizCadence  @default(MONTHLY)
+  questionsPerQuiz  Int          @default(8) @map("questions_per_quiz")
+  // Pinned focus areas (e.g., ["DISCOVERY","DISC:D"]). Empty = auto-pick weakest.
+  focusAreas        Json         @default("[]") @map("focus_areas")
+  // Optional title template — interpolates {month}/{week}/{date}
+  titleTemplate     String?      @map("title_template")
+  notesToRecipient  String?      @db.Text @map("notes_to_recipient")
+  expiresAfterDays  Int          @default(14) @map("expires_after_days")
+  nextRunAt         DateTime     @map("next_run_at")
+  lastRunAt         DateTime?    @map("last_run_at")
+  lastAdHocQuizId   String?      @map("last_ad_hoc_quiz_id")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  aeProfile       AeProfile?       @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  directorProfile DirectorProfile? @relation(fields: [directorProfileId], references: [id], onDelete: Cascade)
+  createdBy       User             @relation("RecurringQuizCreator", fields: [createdByUserId], references: [id])
+
+  @@index([active, nextRunAt])
+  @@map("recurring_quiz_schedules")
+}
+
+// Ad-hoc quizzes — leaders can send a focused quiz to a report (AE or director)
+// targeting a skill gap or personality dimension. Recipient gets an email with a
+// token link; completion writes an AnswerSet.
+model AdHocQuiz {
+  id                String           @id @default(cuid())
+  aeProfileId       String?          @map("ae_profile_id")
+  directorProfileId String?          @map("director_profile_id")
+  sentByUserId      String           @map("sent_by_user_id")
+  title             String
+  description       String?          @db.Text
+  kind              AdHocQuizKind    @default(SKILL_CHECK_IN)
+  // Snapshot of question IDs included in this quiz
+  questionIds       Json             @default("[]") @map("question_ids")
+  focusAreas        Json             @default("[]") @map("focus_areas")  // e.g. ["DISCOVERY", "DISC:D"]
+  tokenHash         String           @unique @map("token_hash")
+  status            AdHocQuizStatus  @default(PENDING)
+  sentAt            DateTime         @default(now()) @map("sent_at")
+  startedAt         DateTime?        @map("started_at")
+  completedAt       DateTime?        @map("completed_at")
+  expiresAt         DateTime         @map("expires_at")
+  // Linked AnswerSet for the responses (created on first answer)
+  answerSetId       String?          @unique @map("answer_set_id")
+
+  aeProfile       AeProfile?       @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  directorProfile DirectorProfile? @relation(fields: [directorProfileId], references: [id], onDelete: Cascade)
+  sentBy          User             @relation("AdHocQuizSender", fields: [sentByUserId], references: [id])
+  answerSet       AnswerSet?       @relation(fields: [answerSetId], references: [id], onDelete: SetNull)
+  retakeRequests  QuizRetakeRequest[] @relation("RetakeQuizTarget")
+
+  @@index([aeProfileId, sentAt])
+  @@index([directorProfileId, sentAt])
+  @@map("ad_hoc_quizzes")
+}
+
+// 1:1 prep — a leader uploads a prep doc, AI cross-refs against the report's
+// profile (AE or director) and generates structured coaching guidance.
+// Polymorphic target: exactly one of aeProfileId / directorProfileId set.
+model OneOnOnePrep {
+  id                  String      @id @default(cuid())
+  aeProfileId         String?     @map("ae_profile_id")
+  directorProfileId   String?     @map("director_profile_id")
+  preparedByUserId    String      @map("prepared_by_user_id")  // the LEADER doing the 1:1 prep
+  weekOf              DateTime?   @map("week_of")
+  prepDocFilename     String?     @map("prep_doc_filename")
+  prepDocText         String      @db.Text @map("prep_doc_text")
+  generatedJson       Json        @default("{}") @map("generated_json")
+  modelUsed           String?     @map("model_used")
+  // Background-job status. Row is created the instant the user clicks
+  // generate; AI work runs async and flips status to READY (or FAILED).
+  // Lets the user navigate away and come back to a finished prep.
+  status              AiJobStatus @default(GENERATING)
+  errorMessage        String?     @db.Text @map("error_message")
+  startedAt           DateTime    @default(now()) @map("started_at")
+  completedAt         DateTime?   @map("completed_at")
+  createdAt           DateTime    @default(now()) @map("created_at")
+
+  aeProfile       AeProfile?       @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  directorProfile DirectorProfile? @relation(fields: [directorProfileId], references: [id], onDelete: Cascade)
+  preparedBy      User             @relation("OneOnOnePrepDirector", fields: [preparedByUserId], references: [id])
+
+  @@index([aeProfileId, createdAt])
+  @@index([directorProfileId, createdAt])
+  @@map("one_on_one_preps")
+}
+
+// ============================================================
+// COACHING PLAN — AI-generated growth plan, click-to-build, lights up when new
+// ============================================================
+//
+// Each plan is a tailored multi-week improvement guide for one user. Built
+// on demand by clicking "Build Coaching Plan" on the profile. Unread plans
+// surface in the Tab badge so the user sees something new is there.
+//
+// Auto-generated tasks: each plan can spawn Task records with the planId
+// linking back. Tasks count toward the dashboard's Tasks badge.
+model CoachingPlan {
+  id                String      @id @default(cuid())
+  aeProfileId       String?     @map("ae_profile_id")
+  directorProfileId String?     @map("director_profile_id")
+  // Who clicked the "Build Coaching Plan" button — could be the user themselves
+  // (self-coaching) or a leader.
+  builtByUserId     String      @map("built_by_user_id")
+  title             String?     // AI-generated short title; shown in the tab list
+  generatedJson     Json        @default("{}") @map("generated_json")
+  modelUsed         String?     @map("model_used")
+  status            AiJobStatus @default(GENERATING)
+  errorMessage      String?     @db.Text @map("error_message")
+  // Read tracking — array of user IDs who've read this plan. The unread state
+  // is "the target user (the subject) hasn't read it yet". When the subject
+  // opens the plan, their ID is appended. Lit-up indicator = subject not in the array.
+  readByJson        Json        @default("[]") @map("read_by_json")
+  // Number of tasks auto-spawned from this plan. Used for the dashboard count.
+  tasksSpawned      Int         @default(0) @map("tasks_spawned")
+  startedAt         DateTime    @default(now()) @map("started_at")
+  completedAt       DateTime?   @map("completed_at")
+  createdAt         DateTime    @default(now()) @map("created_at")
+
+  aeProfile       AeProfile?       @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  directorProfile DirectorProfile? @relation(fields: [directorProfileId], references: [id], onDelete: Cascade)
+  builtBy         User             @relation("CoachingPlanBuilder", fields: [builtByUserId], references: [id])
+
+  @@index([aeProfileId, createdAt])
+  @@index([directorProfileId, createdAt])
+  @@map("coaching_plans")
+}
+
+// ============================================================
+// ORG SKILL BENCHMARKS — per-company "what good looks like"
+// ============================================================
+//
+// Each org can customize what "world-class" looks like for any skill, and
+// upload reference files (top-rep transcripts, win stories, call recordings)
+// that the AI summarizes into a refined whatGoodLooksLike paragraph.
+//
+// If no row exists for an (orgId, category) pair, the platform default from
+// src/lib/skillBenchmarks.ts is used. So this is a lightweight override layer.
+//
+// The platform org's customizations become smart defaults other customer orgs
+// can browse and "borrow" — see /admin/platform-skills.
+model OrgSkillBenchmark {
+  id                  String    @id @default(cuid())
+  orgId               String    @map("org_id")
+  category            String    // matches SkillBenchmark keys: DISCOVERY, LEADERSHIP, etc.
+  // Override fields — null means "use the platform default for this field"
+  whatGoodLooksLike   String?   @db.Text @map("what_good_looks_like")
+  customNotes         String?   @db.Text @map("custom_notes")
+  // AI-synthesized summary derived from uploaded reference files. Stored
+  // separately from whatGoodLooksLike so the admin can review + accept the
+  // AI suggestion before promoting it to the public override.
+  aiSynthesizedSummary String?  @db.Text @map("ai_synthesized_summary")
+  lastSynthesizedAt   DateTime? @map("last_synthesized_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  org   Org                       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  files OrgSkillBenchmarkFile[]
+
+  @@unique([orgId, category])
+  @@map("org_skill_benchmarks")
+}
+
+// Reference files an admin uploads for a benchmark. Files are saved via the
+// shared FileAsset pipeline; we keep a lightweight join row pointing at the
+// extracted text so the AI synth doesn't need to re-extract.
+model OrgSkillBenchmarkFile {
+  id               String    @id @default(cuid())
+  benchmarkId      String    @map("benchmark_id")
+  filename         String
+  storagePath      String    @map("storage_path")
+  textPreview      String    @db.Text @map("text_preview")  // up to ~50k chars
+  uploadedByUserId String    @map("uploaded_by_user_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  benchmark  OrgSkillBenchmark @relation(fields: [benchmarkId], references: [id], onDelete: Cascade)
+  uploadedBy User              @relation(fields: [uploadedByUserId], references: [id])
+
+  @@index([benchmarkId])
+  @@map("org_skill_benchmark_files")
+}
+
+// ============================================================
+// GAMIFIED SELF-COACHING — v3.37
+// ============================================================
+
+// Aggregated game state per user. Updated transactionally on each completed
+// drill. Keeps lookups O(1) for the dashboard pill ("Level 4 · 1,240 pts").
+model UserGameStats {
+  id             String    @id @default(cuid())
+  userId         String    @unique @map("user_id")
+  totalPoints    Int       @default(0) @map("total_points")
+  // Streak = consecutive days with at least one completed drill. Resets if a
+  // calendar day passes with no activity. Stored UTC; compared against the
+  // user's local-day boundary at read time.
+  currentStreak  Int       @default(0) @map("current_streak")
+  longestStreak  Int       @default(0) @map("longest_streak")
+  lastDrillAt    DateTime? @map("last_drill_at")
+  // Level is derived (sqrt-ish curve) but cached so we can show progress
+  // bars without recomputing on every render.
+  level          Int       @default(1)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_game_stats")
+}
+
+// One row per drill attempt. Captures the prompt the AI generated, the user's
+// response, the AI's grade, and the points awarded.
+//
+// Status flow:
+//   IN_PROGRESS - user has started, hasn't submitted yet
+//   COMPLETED   - graded, points awarded
+//   ABANDONED   - user navigated away mid-drill (cleaned by cron)
+model GameAttempt {
+  id              String           @id @default(cuid())
+  userId          String           @map("user_id")
+  orgId           String           @map("org_id")
+  // Skill being practiced — matches SkillBenchmark keys (DISCOVERY, etc.) or
+  // the org's custom skill categories.
+  skillCategory   String           @map("skill_category")
+  // Whether this drill is shaped for an IC (sales-skill practice) or a
+  // leader (coaching-the-team practice). Set from the user's role at start.
+  shape           String           // "AE" | "LEADER"
+  prompt          String           @db.Text  // the scenario / question Grok generated
+  userResponse    String?          @db.Text  // what the user typed
+  aiScore         Int?             @map("ai_score")        // 0-100 from grader
+  aiFeedback      String?          @db.Text @map("ai_feedback")  // markdown
+  pointsAwarded   Int              @default(0) @map("points_awarded")
+  status          GameAttemptStatus @default(IN_PROGRESS)
+  startedAt       DateTime         @default(now()) @map("started_at")
+  completedAt     DateTime?        @map("completed_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, skillCategory, completedAt])
+  @@index([orgId, completedAt])
+  @@map("game_attempts")
+}
+
+enum GameAttemptStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+// ============================================================
+// DIRECTOR MONTHLY REVIEW
+// ============================================================
+
+model DirectorReview {
+  id            String               @id @default(cuid())
+  directorId    String               @map("director_id")
+  aeProfileId   String               @map("ae_profile_id")
+  monthOf       DateTime             @map("month_of")  // first of month
+  status        DirectorReviewStatus @default(PENDING)
+  dueAt         DateTime             @map("due_at")
+  completedAt   DateTime?            @map("completed_at")
+  summary       String?              @db.Text
+  createdAt     DateTime             @default(now()) @map("created_at")
+
+  director  User                   @relation("ReviewDirector", fields: [directorId], references: [id])
+  aeProfile AeProfile              @relation(fields: [aeProfileId], references: [id], onDelete: Cascade)
+  answers   DirectorReviewAnswer[]
+
+  @@unique([directorId, aeProfileId, monthOf])
+  @@index([status])
+  @@map("director_reviews")
+}
+
+model DirectorReviewAnswer {
+  id                String         @id @default(cuid())
+  directorReviewId  String         @map("director_review_id")
+  questionId        String         @map("question_id")
+  value             Json
+  // pre-computed score deltas applied to AE skill categories
+  scoreDeltasJson   Json           @default("[]") @map("score_deltas_json")
+  createdAt         DateTime       @default(now()) @map("created_at")
+
+  directorReview DirectorReview @relation(fields: [directorReviewId], references: [id], onDelete: Cascade)
+  question       Question       @relation(fields: [questionId], references: [id])
+
+  @@unique([directorReviewId, questionId])
+  @@map("director_review_answers")
+}
+
+// ============================================================
+// FILES + FILE MAPPER
+// ============================================================
+
+model FileAsset {
+  id            String         @id @default(cuid())
+  orgId         String         @map("org_id")
+  ownerUserId   String         @map("owner_user_id")
+  aeProfileId   String?        @map("ae_profile_id")
+  kind          FileKind
+  filename      String
+  storagePath   String         @map("storage_path")
+  mimeType      String         @map("mime_type")
+  sizeBytes     Int            @map("size_bytes")
+  visibility    FileVisibility @default(BOTH)
+  mappingId     String?        @unique @map("mapping_id")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  org        Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner      User         @relation("FileOwner", fields: [ownerUserId], references: [id])
+  aeProfile  AeProfile?   @relation(fields: [aeProfileId], references: [id], onDelete: SetNull)
+  mapping    FileMapping? @relation(fields: [mappingId], references: [id])
+  prepDoc    PrepDoc?
+
+  @@index([orgId])
+  @@index([aeProfileId])
+  @@map("file_assets")
+}
+
+// Captures intent at upload time. Can be AI-suggested + director-confirmed.
+model FileMapping {
+  id              String           @id @default(cuid())
+  orgId           String           @map("org_id")
+  mappedByUserId  String           @map("mapped_by_user_id")
+  aeProfileId     String?          @map("ae_profile_id")
+  kind            FileKind
+  updateIntent    FileUpdateIntent @map("update_intent")
+  visibility      FileVisibility   @default(DIRECTOR_ONLY)
+  // AI suggestion fields (before user confirms)
+  aiSuggestedKind         FileKind?            @map("ai_suggested_kind")
+  aiSuggestedAeProfileId  String?              @map("ai_suggested_ae_profile_id")
+  aiSuggestedIntent       FileUpdateIntent?    @map("ai_suggested_intent")
+  aiConfidence            Float?               @map("ai_confidence") // 0-1
+  aiRationale             String?              @db.Text @map("ai_rationale")
+  confirmedAt             DateTime?            @map("confirmed_at")
+  createdAt               DateTime             @default(now()) @map("created_at")
+
+  org         Org         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  mappedBy    User        @relation("MappedBy", fields: [mappedByUserId], references: [id])
+  aeProfile   AeProfile?  @relation(fields: [aeProfileId], references: [id], onDelete: SetNull)
+  fileAsset   FileAsset?
+
+  @@index([orgId])
+  @@index([aeProfileId])
+  @@map("file_mappings")
+}
+
+// ============================================================
+// KNOWLEDGE LIBRARIES
+// ============================================================
+
+model KnowledgeRepository {
+  id          String            @id @default(cuid())
+  orgId       String            @map("org_id")
+  kind        KnowledgeRepoKind
+  name        String
+  description String?
+  visibility  FileVisibility    @default(BOTH)  // PERSONALITY repos → DIRECTOR_ONLY; AE-facing → BOTH
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @default(now()) @updatedAt @map("updated_at")
+
+  org      Org                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  articles KnowledgeArticle[]
+
+  @@unique([orgId, name])
+  @@index([orgId, kind])
+  @@map("knowledge_repositories")
+}
+
+model KnowledgeArticle {
+  id              String            @id @default(cuid())
+  orgId           String            @map("org_id")
+  repositoryId    String            @map("repository_id")
+  productId       String?           @map("product_id")
+  skillCategory   SkillCategory?    @map("skill_category")
+  title           String
+  body            String            @db.Text
+  tagsJson        Json              @default("[]") @map("tags_json")
+  authorUserId    String?           @map("author_user_id")
+  // Approval workflow (v3.9): article is hidden from listings until APPROVED
+  // by an ORG_ADMIN or COMPANY_ADMIN.
+  status          ArticleStatus     @default(PENDING)
+  approvedByUserId String?          @map("approved_by_user_id")
+  approvedAt       DateTime?        @map("approved_at")
+  rejectedReason   String?          @db.Text @map("rejected_reason")
+  // Embedding-ready: nullable. When pgvector is added, this becomes a vector column.
+  // For now stored as JSON array of floats; nullable means "not yet embedded".
+  embedding       Json?             @map("embedding")
+  embeddingModel  String?           @map("embedding_model")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  org        Org                  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  repository KnowledgeRepository  @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  product    Product?             @relation(fields: [productId], references: [id], onDelete: SetNull)
+  author     User?                @relation("KnowledgeAuthor", fields: [authorUserId], references: [id])
+
+  @@index([orgId, repositoryId])
+  @@index([productId])
+  @@index([skillCategory])
+  @@map("knowledge_articles")
+}
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model EmailChangeRequest {
+  id              String            @id @default(cuid())
+  userId          String            @map("user_id")
+  currentEmail    String            @map("current_email")
+  requestedEmail  String            @map("requested_email")
+  status          EmailChangeStatus @default(PENDING)
+  requestedAt     DateTime          @default(now()) @map("requested_at")
+  decidedByUserId String?           @map("decided_by_user_id")
+  decidedAt       DateTime?         @map("decided_at")
+  rejectionReason String?           @db.Text @map("rejection_reason")
+
+  @@index([userId])
+  @@index([status])
+  @@map("email_change_requests")
+}
+
+model AuditLog {
+  id           String      @id @default(cuid())
+  orgId        String?     @map("org_id")
+  actorUserId  String      @map("actor_user_id")
+  action       AuditAction
+  targetType   String      @map("target_type")  // "User" | "AeProfile" | "Question" | etc.
+  targetId     String      @map("target_id")
+  metadata     Json        @default("{}")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  org   Org? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  actor User @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([orgId, createdAt])
+  @@index([actorUserId])
+  @@index([targetType, targetId])
+  @@map("audit_logs")
+}

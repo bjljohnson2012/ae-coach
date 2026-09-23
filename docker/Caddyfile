@@ -1,0 +1,7 @@
+portal.benjohnson.ai {
+    encode gzip
+    reverse_proxy app:3000
+    log {
+        output file /data/access.log
+    }
+}
