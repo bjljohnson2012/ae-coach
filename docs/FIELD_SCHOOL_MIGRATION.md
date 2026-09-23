@@ -9,7 +9,7 @@
 | Behavior and UI source | `AE _ Director Coach` (product name in the UI: Sales Coach AI) |
 | Repos | Implementation PRs land in `bjljohnson2012/field-school` under `app/`, except one write-freeze PR in `bjljohnson2012/ae-coach` |
 
-This document is the migration and integration plan. It is a selection, not a wholesale port of AE Coach onto Field School. Keep the coaching loop and the navy logged-in shell from AE Coach. Keep the course ladder, tenants, events, Field Pattern, and the public brand from Field School. Drop each product's worst mechanisms on purpose. The lists are in "What we keep and what we drop." It is not the GitHub push of the AE Coach tree, and it is not a claim about the contents of production Postgres. The live database `aecoach` was not inspected.
+This document is the migration and integration plan. It is a selection, not a wholesale port of AE Coach onto Field School. Ben prefers the design, UI, and UX of AE Coach to Field School. That preference covers the portal people use: layout, type, color, components, and how a screen moves, not only the nav bar after login. Keep the coaching loop and that interface. Keep the course ladder, tenants, events, and Field Pattern as behavior. The brochure at `fieldschool.ai` stays the Field School brand. Drop each product's worst mechanisms on purpose. The lists are in "What we keep and what we drop." It is not the GitHub push of the AE Coach tree, and it is not a claim about the contents of production Postgres. The live database `aecoach` was not inspected.
 
 ---
 
@@ -21,7 +21,7 @@ The plan is a strangle inside `field-school/app`. Bring the kept AE Coach behavi
 
 Ben confirmed on 2026-09-23 that the point of the move is to gain what AE Coach does not finish: Field School editing, admin controls, tenant structure, reporting, and business intelligence. Editing means the campus content and admin surfaces that already exist, plus the coaching authoring screens in this plan. It is not a new editor. Reporting starts, after cutover, as the existing Analyze explorer pointed at `learning_events` and `skill_states`. Test-environment coaching rows are imported. They are not dropped because they were test data. Household data and the platform org are not deleted to make room.
 
-The logged-in app adopts the AE Coach interface. That is a hard constraint: navy shell, role nav, orange Tasks affordance, command palette, cards, skill tiles, wizard steps, drawers, density, and the tokens in `AE _ Director Coach/tailwind.config.ts` and `src/styles/globals.css`. The public marketing site and signed-out catalog keep the Field School brand (cream `#f6f3ec`, Fraunces, seal, blue `#1f5eff`). The coaching app is not reskinned back to shadcn cream.
+The portal adopts the AE Coach interface. That is a hard constraint, and it is broader than a signed-in color swap. Navy shell, role nav, orange Tasks affordance, command palette, cards, skill tiles, wizard steps, drawers, form controls, density, and the tokens in `AE _ Director Coach/tailwind.config.ts` and `src/styles/globals.css` are the design system for login, the catalog, course stations, Field Pattern, and coaching. A guest does not see a cream marketing header that turns into a navy app after sign-in. The static brochure at `fieldschool.ai` stays cream, Fraunces, and the seal. That site is not the product. The portal is not reskinned back to shadcn cream.
 
 Load is one operator, a handful of directors, tens of AEs, and one household org. The design target is 500 memberships and on the order of 50,000 `learning_events` a year. That fits one Postgres on the existing VPS (`2.24.70.248`). There is no multi-region work in this plan. There is tenancy isolation work, because household data and sales coaching data must not cross orgs, and director-only psychographic content must not show up in learner payloads.
 
@@ -107,7 +107,7 @@ A second framework fork (Prisma app kept alive beside Drizzle) recreates that sp
 - Rebuilding the video factory (Cap, edit, melt), Notion publish, campus MCP, wildcard DNS, or Remotion plates.
 - Replacing `fp-50-v1` with Enneagram, DISC, or MBTI items. Do not copy proprietary instrument text. Imported type **labels** that AE Coach already stores are data, not a new scored instrument.
 - Carrying per-org SMTP passwords. `CompanyProfile.smtpPass` is plaintext in the AE schema comment. Do not import it. Mail goes through the existing Field School Resend/SMTP env on the host. No secret values belong in this document or in git.
-- Reskinning the public marketing site (`field-school/app/marketing-site`, `fieldschool.ai`) into the navy shell.
+- Reskinning the public brochure (`field-school/app/marketing-site`, `fieldschool.ai`) into the navy shell. The portal is not that site. Login and the catalog inside the portal do get the AE Coach interface.
 - Deploying or extending `field-school/src` (TanStack).
 - Designing for unknown future customers beyond the tenancy rules. No new customer names are assumed.
 - Dual-writing coaching rows to both databases during the build.
@@ -126,7 +126,7 @@ These are built and used. The screen or the rule is the reason they stay.
 
 | Keep | Where it lives today |
 |---|---|
-| Logged-in shell: navy bar, role nav, orange Tasks control, command palette, cards, skill tiles, wizard steps, drawers, density | `src/components/AppShell.tsx`, `CommandPalette.tsx`, `WizardStep.tsx`, `TasksNavBadge.tsx`. Tokens in `tailwind.config.ts` (`brand.navy` `#0B1F3A`, `brand.indigo` `#1F3C88`, `brand.orange` `#FF6A1A`, `surface.app` `#F5F7FA`) and `src/styles/globals.css` (`.btn-primary`, `.card`, `.h-page`). Ben prefers this over the Field School logged-in chrome. |
+| Design, UI, and UX of the product: navy bar, role nav, orange Tasks control, command palette, cards, skill tiles, wizard steps, drawers, inputs, density, and the centered login card | `src/components/AppShell.tsx`, `CommandPalette.tsx`, `WizardStep.tsx`, `TasksNavBadge.tsx`, `src/app/(auth)/login/page.tsx`. Tokens in `tailwind.config.ts` (`brand.navy` `#0B1F3A`, `brand.indigo` `#1F3C88`, `brand.orange` `#FF6A1A`, `surface.app` `#F5F7FA`) and `src/styles/globals.css` (`.btn-primary`, `.card`, `.input`, `.h-page`). Ben prefers this to Field School's cream header, Fraunces, and shadcn screens. It applies to the portal, including login, stations, and Pattern, not only to coaching pages after sign-in. |
 | Intake with save/resume, and the skill card including the subject's own type chips | `src/app/(app)/ae/intake`, `src/app/(app)/ae/card/page.tsx`, `src/components/SkillCard.tsx` |
 | Tasks, coaching notes, plans, 1:1 prep, monthly reviews, compare | `src/app/(app)/tasks`, notes and plans on the person file, `src/app/(app)/director/reviews`, `src/app/(app)/director/compare` |
 | Knowledge repos, products, file upload with classify-then-confirm mapping | `src/app/(app)/knowledge`, `src/app/(app)/director/products`, `src/app/(app)/director/files` |
@@ -160,12 +160,12 @@ Do not port these. Do not import them as behavior.
 
 | Keep | Where it lives today |
 |---|---|
-| Course method: watch the clip, do the field work, clear the quiz. Station pages stay station pages | `field-school/app/src/app/c/[courseSlug]/` and `s/[slug]/`. Progress is `reduceCourseProgress` in `app/src/lib/campus-runtime/events.ts` over `watch`, `quiz`, and `assignment` events. Do not fork a second station |
+| Course method: watch the clip, do the field work, clear the quiz. The rules stay. The screen does not | `field-school/app/src/app/c/[courseSlug]/` and `s/[slug]/`. Progress is `reduceCourseProgress` in `app/src/lib/campus-runtime/events.ts` over `watch`, `quiz`, and `assignment` events. Do not fork that reducer. Do restyle the station, quiz, and assignment panels with AE Coach cards, buttons, and inputs |
 | Tenants and stances | `organizations`, `memberships` unique on `(org_id, member_id)`, `wards`. Household and sales in `app/db/0004_tenants.sql` and `app/src/lib/campus-runtime/org.ts`. Events store `actor_stance` |
 | `learning_events` as the only score history. `skill_states` is the projection | `app/src/lib/db/schema.ts`, `app/src/app/api/skills/route.ts` |
 | Field Pattern `fp-50-v1` on `member_profiles`, separate from coaching psychographics | `app/src/lib/pattern/`, UI at `/pattern` |
 | Next.js 16, Drizzle, checked-in SQL, Auth.js v5 | `field-school/app`. Migrations `app/db/0001` through `0004`, plus `0005_coaching.sql` from this plan |
-| Public brand for signed-out pages and the marketing site: cream, Fraunces, seal | `app/src/app/globals.css` `:root` background `#f6f3ec`, Fraunces in `app/src/app/layout.tsx`, `marketing-site/`. Do not reskin the marketing site |
+| The brochure only: cream, Fraunces, seal, on `fieldschool.ai` | `field-school/app/marketing-site/` and `deploy/deploy-site.sh`. Do not reskin that site. Do not use it as the portal's signed-out UI |
 | Org structure, admin, and editing that AE Coach does not finish. Reporting starts at PR 21 on events | Campus `/admin` and the course desk stay. Coaching authoring is the question bank, knowledge, products, and notes already in this plan. No new editor. No warehouse |
 | Guest access to a public catalog, without depending on Grok Bot | Signed-out catalog stays. `courseAllowedInOrg` does not gain `grok-bot`. Sales course link is `/o/sales/welcome` |
 
@@ -175,8 +175,8 @@ These do not survive as the logged-in product.
 
 | Drop | Why it is out |
 |---|---|
-| Cream paper, Fraunces, IBM Plex, and shadcn as the logged-in chrome | `globals.css` `:root` and `.dark`, Fraunces and IBM Plex loaded in `layout.tsx`, `SiteHeader`. Signed-out pages may keep them. Signed-in app routes use the AE shell and override `--font-fraunces` and `--font-ibm-sans` only inside `[data-chrome="coach"]` |
-| The marketing header as coaching navigation | `SiteHeader` links Dashboard, Inbox, Tools, About. That is not the coach nav and not the learner nav |
+| Cream paper, Fraunces, IBM Plex, and shadcn as the portal UI | `globals.css` `:root` and `.dark`, Fraunces and IBM Plex in `layout.tsx`, `SiteHeader`, `quiz-panel.tsx`, `assignment-panel.tsx`. A CSS-variable override on an otherwise unchanged Field School screen is not enough. Login, catalog, stations, Pattern, and coaching use AE Coach components. The brochure is the exception |
+| The marketing header as product navigation | `SiteHeader` links Dashboard, Inbox, Tools, About. That header does not survive inside the portal once the shell flag is on, including for guests. Coach and learner nav come from `AppShell` |
 | Centering the product on the Grok Bot course | `publishedCourses` is only `grok-bot` (`app/src/lib/course/catalog.ts`). Ben said that course will be removed. This plan does not add it to sales and does not make the shell link to it. Removing the route is not a PR here. The catalog is not rebuilt around it |
 | The TanStack tree as a destination or a source of new features | `field-school/src`. `docs/campus-runtime/01-current-state.md` already says not to deploy that tree |
 | Using `isGuardianOf`'s admin short-circuit for coaching | `app/src/lib/pattern/profile.ts` lines 46–47 return true when `actor.stance === "admin"` with no ward row. Coaching access reads `wards` in the active org and does not call this helper. This migration does not change `/pattern`. A real household admin still hits that short-circuit on the Pattern page. An operator membership created by org switch is stance `learner` so it does not |
@@ -190,7 +190,7 @@ These do not survive as the logged-in product.
 
 1. **Strangle, then cut over. Do not big-bang, and do not keep two products.** AE Coach stays the coaching write path until a freeze window. Field School gains the module behind a flag. Rationale: the campus must stay up on `portal.fieldschool.ai`, the AE schema has no migration history, and a link-out leaves two auth systems and two shells. See Alternatives.
 
-2. **Logged-in chrome is the AE shell. Signed-out chrome stays Field School.** Root layout stops owning `SiteHeader` for every route. A `data-chrome="coach"` wrapper swaps tokens only for authenticated app routes. While `/c/grok-bot` still exists, a signed-out visit stays cream, and the same URL after sign-in uses the navy shell. The coaching shell does not link to that course and does not require it. Ben said on 2026-09-23 that the Grok Bot course will be removed. Removing it is not one of these PRs. Rationale: one ladder URL, two brands, matching the hard constraint, without tying coaching to a course that is going away.
+2. **The portal uses AE Coach's design, UI, and UX. The brochure does not.** Decided again on 2026-09-23. Ben likes AE Coach's design, UI, and UX more than Field School's. Root layout stops owning `SiteHeader` for portal routes. When `COACHING_SHELL` is on, login, signup, the catalog, course stations, Pattern, and coaching all use the AE Coach shell, components, and tokens. Guests get that same visual system with a short public nav (wordmark and sign in), not `SiteHeader`. Turning the flag off leaves the current campus alone. That is a rollout guard, not a second design. The coaching shell does not link to `/c/grok-bot`. Ben said that course will be removed. Removing it is not one of these PRs. The static site at `fieldschool.ai` stays cream and Fraunces. Rationale: the product should not change personality at the login button, and a font swap on a shadcn station is still Field School's interface.
 
 3. **Shell colors are fixed.** Navy `#0B1F3A`, indigo `#1F3C88`, orange `#FF6A1A`, paper `#F5F7FA`, Inter, Space Grotesk, IBM Plex Mono. Org logo and org name may vary. `Org.brandPalette` does not recolor the shell. Rationale: per-org theming fights the constraint and the household/sales shared shell.
 
@@ -222,7 +222,9 @@ These do not survive as the logged-in product.
 
 17. **Hostname after cutover is deferred. The build does not wait.** On 2026-09-23 Ben said he will decide later what keeping `portal.benjohnson.ai` does. The working assumption, which cutover can ship without a further confirmation, is a 301 to `https://portal.fieldschool.ai` so there is one cookie jar. Do not flip `AUTH_URL` as part of this plan. Do not block PRs 1–20 on that choice.
 
-18. **Selection, not a wholesale port.** Decided 2026-09-23. The logged-in product is the AE Coach shell and coaching loop on the Field School stack, course ladder, tenants, events, and Field Pattern. Mechanisms on the drop list in "What we keep and what we drop" are not built. Kept coaching behavior is ported as it works, not rewritten for taste. Dropped behavior is not "ported, then fixed later."
+18. **Selection, not a wholesale port.** Decided 2026-09-23. The product is the AE Coach design and coaching loop on the Field School stack, course ladder, tenants, events, and Field Pattern. Mechanisms on the drop list in "What we keep and what we drop" are not built. Kept coaching behavior is ported as it works, not rewritten for taste. Dropped behavior is not "ported, then fixed later."
+
+19. **AE Coach wins the interface, including before sign-in.** Decided 2026-09-23. Design, UI, and UX means the shell, the login card, the page measure, the cards, the buttons, the inputs, the wizard, and the station layout. It does not mean "navy tokens wrapped around unchanged Field School components." `quiz-panel.tsx` and `assignment-panel.tsx` are restyled in place. `reduceCourseProgress` is not rewritten. Pattern's instrument stays `fp-50-v1`. Pattern's page uses the same cards and shell. `fieldschool.ai` is outside this decision.
 
 ---
 
@@ -363,19 +365,21 @@ Hard rules, server-side, with tests:
 
 #### Chrome split
 
-`app/src/app/layout.tsx` today renders `SiteHeader` and `SiteFooter` for every page and loads Fraunces, IBM Plex Sans, and IBM Plex Mono. Change:
+`app/src/app/layout.tsx` today renders `SiteHeader` and `SiteFooter` for every page and loads Fraunces, IBM Plex Sans, and IBM Plex Mono. That is the interface Ben does not want for the product. Change:
 
-- Root layout loads Fraunces, IBM Plex, Inter, and Space Grotesk. It does not choose chrome.
+- Root layout loads Inter and Space Grotesk for the portal. Fraunces and IBM Plex stay available only so the flag-off campus and any leftover brochure embed do not break. The portal does not use them once `COACHING_SHELL` is on.
 - `app/src/components/chrome.tsx` (server component) picks chrome:
-  - No session, or the path is marketing (`/`, `/about`, `/pricing`, `/privacy`, `/terms`, `/login`, `/signup`, `/request-access`, `/share`, `/checkout`, `/docs`): render `SiteHeader` + `SiteFooter`. Wrapper `data-chrome="marketing"`. Tokens stay the current `:root` in `app/src/app/globals.css` (cream `#f6f3ec`, primary `#1f5eff`, Fraunces display).
-  - Session and coaching shell enabled for this member: wrapper `data-chrome="coach"`, `AppShell`, no marketing footer. Paper background `#F5F7FA`.
-- Flag resolution: env `COACHING_SHELL` is the master switch (default off). When on, the shell is on for a member if `organizations.features.coachingShell` is true for the active org, or the member is staff. `chrome.tsx` reads that feature. Order of exposure: staff, then sales, then household. Guest never sees it.
-- `/admin` staff tools stay on the staff gate in `proxy.ts`. When the shell flag is on for that staff user, `/admin` sits in the shell too so the logged-in app does not flip back to cream mid-task. The marketing header does not return.
-- Root layout today always mounts the client `ImpersonationBanner` (`layout.tsx`) and `ThemeScript`, which can set `.dark` on `html`. Marketing chrome keeps both. Coach chrome does not render the client banner. It renders the server-cookie banner only. The theme toggle is not in the coach shell.
+  - `COACHING_SHELL` unset: current campus. `SiteHeader`, cream, Fraunces. This is how a deploy ships without a visual change. It is not the target design.
+  - `COACHING_SHELL` set: wrapper `data-chrome="coach"` on every portal route, signed in or not. Paper `#F5F7FA`. No `SiteHeader`.
+    - No session: public nav is the navy bar with the wordmark and Sign in. No Tasks, no command palette, no role links. `/login` and `/signup` are the AE Coach card (`src/app/(auth)/login/page.tsx`): centered `.card`, navy-to-indigo mark, orange accent, `.input`, `.btn-primary`. Not the Field School login form.
+    - Session: full `AppShell`. Tasks, command palette, and the role nav.
+- Per-org `organizations.features.coachingShell` still gates coaching data and coach nav, in this order: staff, then sales, then household. It does not gate the visual system. Once the env flag is on, a guest and a household learner see the same design. A household learner does not see sales links.
+- `/admin` stays behind the staff gate in `proxy.ts`. When the env flag is on, `/admin` sits in the shell too. The marketing header does not return mid-task.
+- Root layout today always mounts the client `ImpersonationBanner` (`layout.tsx`) and `ThemeScript`, which can set `.dark` on `html`. With the flag on, neither mounts. Coach chrome renders the server-cookie banner only. There is no theme toggle. With the flag off, leave both as they are so the current campus does not change.
 
-Do not copy `tailwind.config.ts` into the Next 16 app. `globals.css` uses `@theme inline`, so `font-display` emits `font-family: var(--font-fraunces), …`, not `var(--font-display)`. Setting `--font-display` or `--font-sans` on the wrapper does not change those utilities. Station pages (`app/src/app/c/[courseSlug]/s/[slug]/page.tsx`, `quiz-panel.tsx`, `assignment-panel.tsx`) keep `font-display`. They are not forked. They change type because the wrapper overrides the variables those utilities already reference.
+Do not copy `tailwind.config.ts` into the Next 16 app. `globals.css` uses `@theme inline`, so `font-display` emits `font-family: var(--font-fraunces), …`, not `var(--font-display)`. Setting `--font-display` or `--font-sans` on the wrapper does not change those utilities. Overriding the font variable is necessary and not sufficient. Station pages (`app/src/app/c/[courseSlug]/s/[slug]/page.tsx`, `quiz-panel.tsx`, `assignment-panel.tsx`) are restyled with the ported card, button, and input classes. Their progress logic is not copied into a second component.
 
-Register coach colors, radii, shadows, and the easing curve on `@theme` so `@apply` has real utilities. Guest `:root` stays cream `#f6f3ec`, primary `#1f5eff`, Fraunces. The new tokens are additive. They do not replace `--font-display` in `@theme`.
+Register coach colors, radii, shadows, and the easing curve on `@theme` so `@apply` has real utilities. While the flag is off, `:root` stays cream `#f6f3ec`, primary `#1f5eff`, Fraunces, so an ordinary deploy does not reskin production. When the flag is on, the portal wrapper uses the coach tokens below, including for guests. The new tokens are additive. They do not replace `--font-display` in `@theme`.
 
 ```css
 @theme inline {
@@ -436,7 +440,7 @@ Register coach colors, radii, shadows, and the easing curve on `@theme` so `@app
 
 That list is every custom property `.dark` rewrites in `globals.css` (`--background` through `--sidebar-ring`), set back to the light coach values. A `.dark` class on `html` then cannot turn the shell blue. `color-scheme: light` stays. Do not add a theme toggle to `AppShell`.
 
-Port `.btn`, `.btn-primary`, `.btn-secondary`, `.btn-ghost`, `.btn-danger`, `.card`, `.card-hover`, `.input`, `.badge-*`, `.h-page`, `.h-section`, `.eyebrow`, `.meta` from `src/styles/globals.css`, but rewrite `@apply` to the Tailwind 4 names above. AE says `shadow-orangeGlow`, `bg-brand-orangeDeep`, and `text-brand-indigoDeep`. The utilities are `shadow-orange-glow`, `bg-brand-orange-deep`, and `text-brand-indigo-deep`. `.badge-success` uses emerald. `.badge-warning` uses amber. `.btn-danger` uses red. Do not paste the Tailwind 3 file. shadcn `Button` picks up orange `--primary` because `--color-primary` is `var(--primary)`. That part does not need a new utility. `font-display` on an existing station becomes Space Grotesk because `--font-fraunces` changed, not because a second station component exists. Guest pages sit outside the wrapper, so Fraunces stays.
+Port `.btn`, `.btn-primary`, `.btn-secondary`, `.btn-ghost`, `.btn-danger`, `.card`, `.card-hover`, `.input`, `.badge-*`, `.h-page`, `.h-section`, `.eyebrow`, `.meta` from `src/styles/globals.css`, but rewrite `@apply` to the Tailwind 4 names above. AE says `shadow-orangeGlow`, `bg-brand-orangeDeep`, and `text-brand-indigoDeep`. The utilities are `shadow-orange-glow`, `bg-brand-orange-deep`, and `text-brand-indigo-deep`. `.badge-success` uses emerald. `.badge-warning` uses amber. `.btn-danger` uses red. Do not paste the Tailwind 3 file. shadcn `Button` picking up orange `--primary` is not the station design. Screens a person uses, including the station quiz and the assignment, call `.btn-primary`, `.card`, and `.input`. A shadcn button that happens to be orange is still Field School's UI. Guest portal pages sit inside the same wrapper when the flag is on, so they do not stay Fraunces.
 
 `AppShell` is a port of `src/components/AppShell.tsx`:
 
@@ -517,7 +521,9 @@ An engineer can build these without inventing layout. Page wrapper is `max-w-7xl
 
 **Tasks — `/tasks`.** Port of `/tasks`. Open and in-progress `work_items` for the actor, due date, complete control. Coaches also see retake requests. Orange badge uses the same count.
 
-**Course station — existing `/c/[courseSlug]/s/[slug]` and `/o/[slug]/welcome`.** Ladder behavior stays: watch, field work, quiz, `reduceCourseProgress`. Do not fork a second station component. `font-display` on those pages becomes Space Grotesk inside `[data-chrome="coach"]` because `--font-fraunces` is overridden there. Guest render, outside the wrapper, stays Fraunces. Button color follows `--primary` on the wrapper. Quiz rules do not change.
+**Course station — existing `/c/[courseSlug]/s/[slug]` and `/o/[slug]/welcome`.** Ladder behavior stays: watch, field work, quiz, `reduceCourseProgress`. Do not fork that function and do not invent a second progress model. Do replace the Field School presentation. The clip, the assignment, and the quiz sit in `.card` blocks on a `.page`. Primary actions are `.btn-primary`. Questions use `.input` or the same one-question rhythm as `WizardStep` where the station asks one thing at a time. Titles use `.h-page` and `.h-section`. A guest with the flag on sees that same layout under the public nav. Quiz pass rules do not change.
+
+**Field Pattern — `/pattern`.** The instrument stays `fp-50-v1`. The page uses the same shell, cards, and buttons. Do not leave the shadcn pattern layout in place inside the navy shell.
 
 **Intake wizard — `/intake`.** Port of `IntakeWizard`. One question at a time, save and resume, progress from `resume_index`. Server returns intercalated order. Submit sets `synthesis_status = generating` and returns immediately. Banner polls `GET /api/coaching/synthesis`.
 
@@ -679,12 +685,12 @@ These are easy to "simplify" and should not be simplified:
 
 | Surface | Chrome | Notes |
 |---|---|---|
-| `fieldschool.ai` marketing HTML | Unchanged, cream, Fraunces, seal | Not this app's React tree. `deploy/deploy-site.sh` stays as it is |
-| Signed-out portal: `/`, `/about`, `/pricing`, `/login`, `/signup`, `/c/grok-bot` | `SiteHeader`, cream | Guest ladder progress remains local. `POST /api/events` stays 401 for guests |
-| Signed-in portal with flag off | `SiteHeader`, cream | Current campus. Default until rollout |
-| Signed-in with flag on | `AppShell` | Same course URLs |
+| `fieldschool.ai` marketing HTML | Unchanged, cream, Fraunces, seal | The brochure. Not the product. `deploy/deploy-site.sh` stays as it is |
+| Portal with `COACHING_SHELL` unset | `SiteHeader`, cream | Rollout guard only. Not the target |
+| Portal with the flag on, no session | AE public nav and the AE login card | Same tokens as the app. Guest ladder progress stays local. `POST /api/events` stays 401 for guests. `/login` is the centered card from AE Coach |
+| Portal with the flag on, session | `AppShell` | Stations, Pattern, and coaching share it. Same course URLs |
 | `portal.benjohnson.ai` before cutover | AE Coach, unchanged | Still NextAuth |
-| `portal.benjohnson.ai` after cutover | Field School coach shell | Auth.js on the campus origin's session config. See Rollout for cookies and `AUTH_URL` |
+| `portal.benjohnson.ai` after cutover | The same AE Coach interface on Field School | Auth.js on the campus origin's session config. See Rollout for cookies and `AUTH_URL` |
 
 `courseAllowedInOrg` stays the isolation check for station events. Sales does not gain `grok-bot`. The shell's course link is `/o/sales/welcome` only. Ben said on 2026-09-23 that the Grok Bot course will be removed. Retiring `/c/grok-bot` is a separate Field School change. It is not a PR in this plan and it is not a cutover dependency. Until that removal lands, a signed-out visit to the old URL can still render. The coaching nav must not point at it.
 
@@ -1055,10 +1061,10 @@ Flag and switches:
 ### Order
 
 1. **Schema and guard, flag off.** Campus behavior unchanged. `portal.fieldschool.ai` keeps cream chrome. Deploy as a normal Field School release.
-2. **Shell for staff only.** `COACHING_SHELL=1`, feature flag on the operator org only. Staff walk roster empty states, course station in the navy shell, household and sales nav. Guest and normal members still see `SiteHeader`.
+2. **AE Coach interface on, coaching links for staff only.** `COACHING_SHELL=1`. Guests and members see the AE Coach design, including login and stations. `features.coachingShell` is on for the operator org only, so only staff get coach links and empty coaching screens. A normal member does not see the cream header, and does not see Roster.
 3. **Vertical slices** (PRs below) on the same flag. Directors do not use Field School for real coaching yet.
 4. **Dry-run import**, then a real snapshot import with `COACHING_WRITES=0`. Staff compare one known person in AE Coach and in Field School. This document does not name that person. Mismatch stops the rollout.
-5. **Sales flag on for Ben only** (staff membership), still read-only. Household flag stays off until sales nav is right, then household flag on for the household admin. Children should see the shell only after a parent has looked at it.
+5. **Sales coaching links on for Ben only** (staff membership), still read-only. The interface is already the AE Coach one from step 2. Household coaching links stay off until sales nav is right, then on for the household admin. A parent walks the household nav before a child is expected to use those links. The child already sees the AE Coach interface.
 6. **Freeze.** Set `AE_WRITES_FROZEN=1` and stop the AE cron sidecar in the same change. Mutating routes return 503, including `GET /api/cron/run-quiz-schedules` and `GET /api/cron/run-weekly-briefs`, because those GETs insert rows. A test in the AE PR asserts a frozen cron call does not insert a quiz. Other GETs still work, so `portal.benjohnson.ai` stays readable. The public quiz page is also frozen, or it would keep writing answer sets.
 7. **Delta import.** Counts must match. Then `COACHING_WRITES=1` on Field School.
 8. **Cutover.** The working assumption, which does not need another confirmation from Ben, is that `portal.benjohnson.ai` 301s to `https://portal.fieldschool.ai`. He deferred the hostname choice on 2026-09-23. PRs 1–20 are built against that 301. Do not flip `AUTH_URL`. Do not install `field-school/deploy/caddy.university.conf`. That sample still `reverse_proxy`s `university.benjohnson.ai` to `field-school-app:3000`. `docs/campus-runtime/01-current-state.md` still says the 301 is held. Both are stale. Live `HEAD https://university.benjohnson.ai/` on 2026-09-23 returned `301` to `https://portal.fieldschool.ai/`. Leave that 301 in place. Edit only the `portal.benjohnson.ai` block in the live Caddy file `/opt/ae-coach/docker/Caddyfile`, and update the repo copy of that host in the same change. The repo file today only contains the one host. The live file is the source of truth for other host blocks (`CURRENT_STATE.md`). Do not replace the live file with the short repo file. If Ben later keeps both hosts, that is a Caddy and cookie change on top of this plan, not a reason to pause the module.
@@ -1111,6 +1117,7 @@ AE boot command stays `prisma db push` only on the AE database. Rollback must no
 - `fp-50-v1` run still resets Bearing. Import did not write `instrument_runs`.
 - Household 1–4 diagnostic still works and did not gain 0–100 sales scores.
 - With the flag off, `SiteHeader` is present and Fraunces still styles `/about`.
+- With the flag on, `/login` is the AE Coach card and a signed-out station does not render `SiteHeader`.
 
 ---
 
@@ -1178,13 +1185,13 @@ AE boot command stays `prisma db push` only on the AE database. Rollback must no
 
 ## PR Plan
 
-PRs land in `bjljohnson2012/field-school`, directory `app/`, unless noted. Each is one reviewable concern. A solo builder does them in order. Flag defaults keep `portal.fieldschool.ai` on the cream header until PR 3 is turned on for staff. Do not start the freeze until the import dry-run in PR 16 has been run by the operator. The earlier "ten PRs" split put the AI client, the wizard, and the question bank in one diff, and the whole coaching loop in the next. That is too much to review. The list below is longer on purpose.
+PRs land in `bjljohnson2012/field-school`, directory `app/`, unless noted. Each is one reviewable concern. A solo builder does them in order. Flag defaults keep `portal.fieldschool.ai` on the current cream header until `COACHING_SHELL` is turned on. When it is on, guests and signed-in people both get the AE Coach interface. Do not start the freeze until the import dry-run in PR 16 has been run by the operator. The earlier "ten PRs" split put the AI client, the wizard, and the question bank in one diff, and the whole coaching loop in the next. That is too much to review. The list below is longer on purpose.
 
 ### PR 1 — Coach tokens, chrome switch, per-org flag
 
 - **Depends on:** none.
-- **Files:** `app/src/app/globals.css`, `app/src/app/layout.tsx`, `app/src/components/chrome.tsx`, `app/src/components/app-shell.tsx` (static nav), `app/src/components/impersonation-banner.tsx` (marketing only).
-- **Change:** Load Inter and Space Grotesk. Register brand colors, radii, shadows, and `ease-brand` on `@theme`. Override `--font-fraunces` and `--font-ibm-sans` inside `[data-chrome="coach"]`, and reset every variable `.dark` sets. Move `SiteHeader`, `SiteFooter`, `ThemeScript`'s toggle, and the client `ImpersonationBanner` behind marketing chrome. Coach chrome forces light tokens and does not render that banner. Do not port `BrandTheme` or `brandPalette`. Do not add catalog content and do not make the shell depend on `/c/grok-bot`. The signed-out proof may still hit that URL while it exists. It is a chrome check, not a decision to keep the course. `chrome.tsx` turns the shell on only when `COACHING_SHELL` is set and (`organizations.features.coachingShell` is true for the active org, or the viewer is staff). Default feature value is false, so a deploy with the env unset changes nothing. Proof: flag unset, signed-out pages stay cream and Fraunces.
+- **Files:** `app/src/app/globals.css`, `app/src/app/layout.tsx`, `app/src/components/chrome.tsx`, `app/src/components/app-shell.tsx` (static nav), `app/src/app/login/login-form.tsx`, `app/src/app/login/page.tsx`.
+- **Change:** Load Inter and Space Grotesk. Register brand colors, radii, shadows, and `ease-brand` on `@theme`. When `COACHING_SHELL` is on, every portal route uses `data-chrome="coach"`, including guests. Reset every variable `.dark` sets. Do not mount `SiteHeader`, `SiteFooter`, `ThemeScript`, or the client `ImpersonationBanner` in that mode. Guests get the navy public nav. `/login` becomes the centered AE Coach card. Signed-in people get `AppShell`. Do not port `BrandTheme` or `brandPalette`. Do not add catalog content and do not make the shell depend on `/c/grok-bot`. Default flag is unset, so a deploy with the env unset changes nothing. Proof: flag unset, `/login` stays the current cream page. Flag on, `/login` is the navy card and a signed-out station is paper, Space Grotesk, and `.card`, not Fraunces inside `SiteHeader`.
 
 ### PR 2 — Schema, access guard, operator seed, write gate
 
@@ -1258,11 +1265,11 @@ PRs land in `bjljohnson2012/field-school`, directory `app/`, unless noted. Each 
 - **Files:** `app/src/app/quiz/[token]/page.tsx`, `app/src/app/api/coaching/quiz/[token]/route.ts`, `app/src/app/api/coaching/quiz/[token]/submit/route.ts`, `app/src/lib/coaching/quiz-token.ts`.
 - **Change:** No session. SHA-256 the token and look up `token_hash`. Submit calls `requireCoachingWrite`. This PR is in before cron is enabled.
 
-### PR 14 — Drills and station skin
+### PR 14 — Drills and the station interface
 
 - **Depends on:** PR 1, PR 5.
-- **Files:** `app/src/app/improve/*`, `app/src/app/api/coaching/drills/*`. No edits to quiz logic in `quiz-panel.tsx` or `assignment-panel.tsx`.
-- **Change:** One server action inserts `drill_attempts` and the `drill` event. Caller is the subject. `POST /api/events` stays unchanged. Station type follows the chrome variable override from PR 1. Do not add a second station component.
+- **Files:** `app/src/app/improve/*`, `app/src/app/api/coaching/drills/*`, `app/src/components/quiz-panel.tsx`, `app/src/components/assignment-panel.tsx`, `app/src/app/c/[courseSlug]/s/[slug]/page.tsx`, `app/src/app/pattern/page.tsx`.
+- **Change:** One server action inserts `drill_attempts` and the `drill` event. Caller is the subject. `POST /api/events` stays unchanged. Restyle the station, the quiz panel, the assignment panel, and `/pattern` with `.card`, `.btn-primary`, `.input`, and `.h-section`. Do not change `reduceCourseProgress`, the pass rule, or the Field Pattern items. Do not add a second station component. A font override alone does not close this PR.
 
 ### PR 15 — Health and logs
 
