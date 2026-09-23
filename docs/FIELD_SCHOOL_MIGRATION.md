@@ -9,13 +9,13 @@
 | Behavior and UI source | `AE _ Director Coach` (product name in the UI: Sales Coach AI) |
 | Repos | Implementation PRs land in `bjljohnson2012/field-school` under `app/`, except one write-freeze PR in `bjljohnson2012/ae-coach` |
 
-This document is the migration and integration plan. It is a selection, not a wholesale port of AE Coach onto Field School. Ben prefers the design, UI, and UX of AE Coach to Field School. That preference covers the portal people use: layout, type, color, components, and how a screen moves, not only the nav bar after login. Keep the coaching loop and that interface. Keep the course ladder, tenants, events, and Field Pattern as behavior. The brochure at `fieldschool.ai` stays the Field School brand. Drop each product's worst mechanisms on purpose. The lists are in "What we keep and what we drop." It is not the GitHub push of the AE Coach tree, and it is not a claim about the contents of production Postgres. The live database `aecoach` was not inspected.
+This document is the migration and integration plan. It is a selection, not a wholesale port of AE Coach onto Field School. Ben prefers the design, UI, and UX of AE Coach to Field School, and he judges AE Coach the more powerful platform. Field School's current portal is messy: two trees, a marketing header as the app, and docs that disagree with the live site. That preference covers the portal people use: layout, type, color, components, and how a screen moves, not only the nav bar after login. The move cleans that up. It does not preserve it. Keep the coaching loop and that interface. Keep the course ladder, tenants, events, and Field Pattern as behavior. The brochure at `fieldschool.ai` stays the Field School brand. Drop each product's worst mechanisms on purpose. The lists are in "What we keep and what we drop." It is not the GitHub push of the AE Coach tree, and it is not a claim about the contents of production Postgres. The live database `aecoach` was not inspected.
 
 ---
 
 ## Overview
 
-AE Coach (`portal.benjohnson.ai`) is the working sales-coaching product: director workflows, intake, skill cards, tasks, reviews, knowledge, and the navy app shell Ben wants to keep. Field School (`portal.fieldschool.ai`, code in `/Users/Owner/field-school/app`) is the product home going forward: course ladder, guest catalog, household and sales tenants, learning events, stances, and Field Pattern `fp-50-v1`. The kept parts of both are required. The dropped parts are not. Two products is not an acceptable end state.
+AE Coach (`portal.benjohnson.ai`) is the stronger product. A coach can already run intake, a skill card, tasks, notes, plans, prep, reviews, knowledge, and a question bank in one place. Field School (`portal.fieldschool.ai`, code in `/Users/Owner/field-school/app`) is the code base this moves into, because its stack, course method, tenants, events, and Field Pattern are worth keeping. Its current shape is not. Ben said on 2026-09-23 that Field School is messy and he does not like that. The kept ideas are required. The mess is not. Two products is not an acceptable end state.
 
 The plan is a strangle inside `field-school/app`. Bring the kept AE Coach behavior and the kept Field School behavior onto Next.js 16, Drizzle, and Auth.js v5. Map the kept rows into the campus schema. Do not carry Next.js 14, Prisma, or NextAuth v4 forward. Do not rebuild the catalog around the Grok Bot course. Dropped behavior is left behind. It is not ported and fixed later. AE Coach keeps serving `portal.benjohnson.ai` and stays the write path for coaching until a short freeze, a final import, and a Caddy upstream flip. Rollback is that upstream flip, not a schema merge.
 
@@ -92,14 +92,15 @@ A second framework fork (Prisma app kept alive beside Drizzle) recreates that sp
 
 1. One logged-in product in `field-school/app`. Coaching, the course ladder, household teaching, and sales learning share one shell, one auth session, one Postgres, and one AI module.
 2. Port what "What we keep and what we drop" keeps, and leave the drop list behind. Coaching behavior on the keep list is moved as it works today. It is not redesigned for its own sake. Dropped behavior is not ported and then repaired. Map the kept data. Do not map the dropped mechanisms.
-3. Keep the course ladder (watch / field work / quiz), guest catalog, learning events, household org, sales org, stances, wards, and Field Pattern `fp-50-v1`.
-4. Keep personality and psychographic **routing** director-only unless `routeTo` is the learner. Keep coaching notes hidden from the learner unless a coach opts in. Keep wizard category labels off the client.
-5. Every skill-score change is a `learning_events` row plus a projection. No parallel score table that nothing else reads.
-6. Household rows and sales rows are isolated by `org_id` on every new table, checked in one access module.
-7. `portal.fieldschool.ai` keeps serving the campus through the whole build. `portal.benjohnson.ai` cuts over only after a freeze and a replayable import. Rollback does not require restoring a database backup as the first step.
-8. A solo builder can land the work as a short sequence of reviewable PRs.
-9. Keep AE Coach's coaching rows, including rows that were created in a test environment, and put them in Field School orgs without collapsing them into `sales`, `household`, or `field-school` unless Ben later supplies an explicit map. The existing sales org stays the sales-shaped tenant.
-10. Give operators a reporting surface after cutover. The first one is the AE `/admin/analyze` explorer, org-scoped, reading `learning_events` and `skill_states`. That is the business-intelligence start. It is not a warehouse and not a new chart vendor, and it does not block the coaching cutover.
+3. Clean Field School while moving in. Do not wrap the current portal and call it done. One app, one nav, one status story. AE Coach is the bar for a finished surface: open the product and do the job, without a second tree or a stack of prompts to explain it.
+4. Keep the course ladder (watch / field work / quiz), guest catalog, learning events, household org, sales org, stances, wards, and Field Pattern `fp-50-v1`.
+5. Keep personality and psychographic **routing** director-only unless `routeTo` is the learner. Keep coaching notes hidden from the learner unless a coach opts in. Keep wizard category labels off the client.
+6. Every skill-score change is a `learning_events` row plus a projection. No parallel score table that nothing else reads.
+7. Household rows and sales rows are isolated by `org_id` on every new table, checked in one access module.
+8. `portal.fieldschool.ai` keeps serving the campus through the whole build. `portal.benjohnson.ai` cuts over only after a freeze and a replayable import. Rollback does not require restoring a database backup as the first step.
+9. A solo builder can land the work as a short sequence of reviewable PRs.
+10. Keep AE Coach's coaching rows, including rows that were created in a test environment, and put them in Field School orgs without collapsing them into `sales`, `household`, or `field-school` unless Ben later supplies an explicit map. The existing sales org stays the sales-shaped tenant.
+11. Give operators a reporting surface after cutover. The first one is the AE `/admin/analyze` explorer, org-scoped, reading `learning_events` and `skill_states`. That is the business-intelligence start. It is not a warehouse and not a new chart vendor, and it does not block the coaching cutover.
 
 ### Non-goals
 
@@ -113,6 +114,7 @@ A second framework fork (Prisma app kept alive beside Drizzle) recreates that sp
 - Dual-writing coaching rows to both databases during the build.
 - A new data warehouse, a new chart vendor, or a full BI product. Reporting is a goal. The non-goal is a second analytics stack. The first surface is PR 21.
 - Retiring `/c/grok-bot`. Ben said on 2026-09-23 that the Grok Bot course will be removed. That removal is a separate Field School change. This migration does not add `grok-bot` to the sales allow-list, does not link the shell to it, and does not rebuild the catalog around it.
+- Another wave prompt, `CURRENT_RUN`, or a second status file that an engineer is supposed to follow instead of this plan and `field-school/app`.
 
 ---
 
@@ -184,6 +186,30 @@ These do not survive as the logged-in product.
 | Operating two apps, two auth systems, and the stale university Caddy sample | After cutover, one app. `field-school/deploy/caddy.university.conf` still `reverse_proxy`s `university.benjohnson.ai` to `field-school-app`. The live host 301s to `https://portal.fieldschool.ai/`. Do not install the sample |
 | A second home URL | Household home is `/o/household/welcome`. Sales lesson is `/o/sales/welcome`. `getCourse("sales")` is undefined, so `/c/sales` 404s. There is no `/home` |
 
+### AE Coach is stronger. Field School is the mess to clean up
+
+Ben's judgment on 2026-09-23: AE Coach is the more powerful platform, and Field School as it stands is messy. He does not want that mess in the product. Power here means a person can do the whole job in one app. Mess means several half-finished fronts that disagree.
+
+What AE Coach already is, and what the portal has to feel like when this is done:
+
+- One shell and one person file. A coach opens someone and sees the card, notes, plan, prep, tasks, and reviews.
+- Intake, the question bank, knowledge, products, files, drills, and the public quiz are screens, not ideas in a doc.
+- Access rules live in one module (`src/lib/tenancy.ts`). AI calls live in one module (`src/lib/ai.ts`).
+
+What is messy in Field School today, and what this plan does with it:
+
+| Mess | Where | What happens |
+|---|---|---|
+| Two applications | `field-school/src` is TanStack. `field-school/app` is the Next portal. `docs/campus-runtime/01-current-state.md` says GitHub `main` is the wrong ship path | `app/` is the only product. Do not port features out of `src/`. PR 22 says so in the Field School README. The TanStack tree is not deleted in this migration. It is not a place to build |
+| Docs that contradict the live site | `deploy/caddy.university.conf` still reverse-proxies `university.benjohnson.ai`. `01-current-state.md` still says that 301 is held and `AUTH_URL` is `university.benjohnson.ai`. Live `university.benjohnson.ai` 301s to `https://portal.fieldschool.ai/` | Do not install that Caddy sample. PR 22 marks it do-not-install and points the status note at the live 301. This plan does not flip `AUTH_URL` |
+| A marketing header used as the app | `SiteHeader` on every portal page | Gone from the portal when `COACHING_SHELL` is on. Already decision 2 |
+| A catalog that is one course Ben is removing | `publishedCourses` is only `grok-bot` | The shell does not depend on it. Removing the course is still not a PR here |
+| The campus deploy lives inside AE Coach's Docker network and Caddy file | `field-school/deploy/docker-compose.yml` joins `ae-coach_default`. Deploy scripts edit `/opt/ae-coach/docker/Caddyfile` | One edge after cutover. Do not add a third compose project or a second Caddy file to "be safe" |
+| Several status files and build prompts | `docs/campus-runtime/` holds `STATUS.md`, `CURRENT_RUN.md`, `GROK_BUILD_PROMPT.md`, wave notes | No new prompt and no new status file for this work. This document is the plan. `app/` is the code |
+| Auth and impersonation split across a JSON store, Postgres, and a browser portal store | `app/src/auth.ts`, `app/src/lib/portal.ts` | One Auth.js session. Coaching impersonation is the server cookie in the tenancy section, not the browser store |
+
+Field School still contributes the course method, tenants, events, Field Pattern, Drizzle, and Auth.js. Those are the parts worth keeping. They do not excuse the two trees, the stale edge, or the marketing header. Editing, admin, structure, reporting, and business intelligence are still the capabilities Ben wants to gain. They get built on the cleaned portal. They are not a reason to keep the current screens.
+
 ---
 
 ## Key Decisions
@@ -225,6 +251,8 @@ These do not survive as the logged-in product.
 18. **Selection, not a wholesale port.** Decided 2026-09-23. The product is the AE Coach design and coaching loop on the Field School stack, course ladder, tenants, events, and Field Pattern. Mechanisms on the drop list in "What we keep and what we drop" are not built. Kept coaching behavior is ported as it works, not rewritten for taste. Dropped behavior is not "ported, then fixed later."
 
 19. **AE Coach wins the interface, including before sign-in.** Decided 2026-09-23. Design, UI, and UX means the shell, the login card, the page measure, the cards, the buttons, the inputs, the wizard, and the station layout. It does not mean "navy tokens wrapped around unchanged Field School components." `quiz-panel.tsx` and `assignment-panel.tsx` are restyled in place. `reduceCourseProgress` is not rewritten. Pattern's instrument stays `fp-50-v1`. Pattern's page uses the same cards and shell. `fieldschool.ai` is outside this decision.
+
+20. **AE Coach is the more powerful product. Field School's current shape does not survive.** Decided 2026-09-23. Power means one place to coach, learn, and teach. The move uses Field School's stack and the ideas in the keep list. It does not preserve two trees, a stale Caddy sample, a stack of wave prompts, or a marketing header as the app. A finished screen meets the AE Coach bar: the job is in the product, not in a side document. PR 22 is the written front door. It does not delete the TanStack tree and it does not flip `AUTH_URL`.
 
 ---
 
@@ -1313,4 +1341,10 @@ PRs land in `bjljohnson2012/field-school`, directory `app/`, unless noted. Each 
 - **Files:** `app/src/app/coaching/analyze/page.tsx`, `app/src/app/api/coaching/analyze/route.ts`, `app/src/lib/coaching/nav.ts` (link for org `admin` and `platform_admin` only).
 - **Change:** Port the org-scoped explorer in `AE _ Director Coach/src/app/(app)/admin/analyze/page.tsx`. Counts and the activity list read `learning_events` for the active org. Skill averages read `skill_states` for that org, not a second score table. Personality tallies read `coaching_profiles` for that org and are returned only to org `admin` and `platform_admin`, the same audience as AE `requireRole("ORG_ADMIN", "COMPANY_ADMIN")`. A coach, a leader who is not an admin, and every learner get 403. No warehouse, no new chart vendor, no cross-org query. This is the reporting surface the move is for. It is not a new editor. Editing stays on the campus admin and content screens plus the coaching authoring screens already in PRs 6, 7, 9, and 12.
 
-PRs 1–18 and 20 are the Field School cutover set. PR 19 is the AE freeze. PR 21 is the post-cutover Analyze page and is not part of that set. Help (PR 11) and account (PR 18) are separate so the shell never links a missing page. None of them adds a second framework. Do not stack PR 5 with PR 6, PR 8 with PR 9, or PR 12 with PR 14. Those were the diffs the first plan made too large. Do not pull PR 21 forward into the cutover.
+### PR 22 — One front door
+
+- **Depends on:** none. Land it before feature work so the next reader does not follow the TanStack tree or the stale 301 note.
+- **Files:** `field-school/README.md`, `field-school/docs/campus-runtime/STATUS.md`, `field-school/deploy/caddy.university.conf` (a comment at the top only).
+- **Change:** README says `app/` is the only ship path and `src/` is not a place to build. STATUS says `university.benjohnson.ai` 301s to `https://portal.fieldschool.ai/` and points at `ae-coach/docs/FIELD_SCHOOL_MIGRATION.md`. The Caddy sample is marked do-not-install. Do not edit the live Caddy file in this PR. Do not delete `src/`. Do not add a `CURRENT_RUN` or another build prompt. Do not flip `AUTH_URL`.
+
+PRs 1–18 and 20 are the Field School cutover set. PR 19 is the AE freeze. PR 21 is the post-cutover Analyze page and is not part of that set. PR 22 is the front door and can land first. Help (PR 11) and account (PR 18) are separate so the shell never links a missing page. None of them adds a second framework. Do not stack PR 5 with PR 6, PR 8 with PR 9, or PR 12 with PR 14. Those were the diffs the first plan made too large. Do not pull PR 21 forward into the cutover.
