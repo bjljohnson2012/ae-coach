@@ -12,6 +12,13 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
+function frozenWritesResponse() {
+  return NextResponse.json(
+    { error: "AE writes are frozen" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 const Body = z.object({
   answers: z.array(z.object({
     questionId: z.string(),
@@ -24,6 +31,10 @@ function hashToken(t: string): string {
 }
 
 export async function POST(req: Request, { params }: { params: { token: string } }) {
+  // Public write. Refuse before the token lookup so a frozen submit cannot insert.
+  // Bracket access so the runtime flag is not inlined at image build.
+  if (process.env["AE_WRITES_FROZEN"] === "1") return frozenWritesResponse();
+
   const tokenHash = hashToken(params.token);
   const quiz = await prisma.adHocQuiz.findUnique({ where: { tokenHash } });
   if (!quiz) return NextResponse.json({ error: "Quiz not found" }, { status: 404 });

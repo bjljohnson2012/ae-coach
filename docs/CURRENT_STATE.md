@@ -95,6 +95,8 @@ Cron, called by the Compose sidecar with `CRON_SECRET`:
 - `POST /api/cron/run-quiz-schedules`
 - `GET /api/cron/run-weekly-briefs`
 
+The operator stops the AE cron sidecar in the same freeze step as setting `AE_WRITES_FROZEN=1`. That flag returns 503 from non-GET handlers, from the quiz-schedule and weekly-brief cron GETs, and from public quiz submit, and it leaves other GETs, login, and static assets working. The sidecar is a separate Compose process, so leaving it up would keep calling those cron routes after the flag is on.
+
 ## Data model
 
 Full schema: `prisma/schema.prisma`. 39 models. There is no `prisma/migrations` history; production sync is `db push` in `docker-compose.yml`.

@@ -14,6 +14,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   });
 
   const impersonation = await getImpersonationStatus();
+  // Bracket access so `next build` does not bake the flag off. The operator
+  // sets AE_WRITES_FROZEN=1 at runtime, in the same step as stopping the cron sidecar.
+  const writesFrozen = process.env["AE_WRITES_FROZEN"] === "1";
 
   let pendingTaskCount = 0;
   if (ctx.role === "AE") {
@@ -28,6 +31,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <>
       <BrandTheme palette={(org?.brandPalette as any) ?? null} fallbackPrimary={org?.brandColor ?? null} />
+      {writesFrozen && (
+        <div
+          role="status"
+          data-writes-frozen="1"
+          className="bg-brand-amber text-[#5a3a00] px-4 py-2 text-sm text-center border-b border-amber-300"
+        >
+          Writes are paused. You can still read. Changes, quizzes, and scheduled sends will not save.
+        </div>
+      )}
       {impersonation?.isImpersonating && impersonation.targetName && (
         <ImpersonationBanner targetName={impersonation.targetName} targetRole={impersonation.targetRole ?? ""} />
       )}

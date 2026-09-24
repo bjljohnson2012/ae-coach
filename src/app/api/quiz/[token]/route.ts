@@ -3,6 +3,9 @@
  *
  * GET    /api/quiz/[token]            — get quiz + question list (no login required)
  * POST   /api/quiz/[token]/submit     — finalize: persist all answers + close quiz
+ *
+ * AE_WRITES_FROZEN=1 leaves this GET up. It only reads. The write is
+ * POST /api/quiz/[token]/submit, which returns 503 and does not insert.
  */
 import { NextResponse } from "next/server";
 import { z } from "zod";

@@ -21,8 +21,57 @@ const PUBLIC_PATHS = [
   "/api/health",
 ];
 
+// These GETs insert or update rows. Every other GET stays readable while frozen.
+const WRITE_CRON_GETS = ["/api/cron/run-quiz-schedules", "/api/cron/run-weekly-briefs"];
+
+function pathIs(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function isLoginPath(pathname: string): boolean {
+  return pathIs(pathname, "/login") || pathIs(pathname, "/api/auth");
+}
+
+function isStaticAssetPath(pathname: string): boolean {
+  return (
+    pathIs(pathname, "/_next/static") ||
+    pathIs(pathname, "/_next/image") ||
+    pathname === "/favicon.ico" ||
+    pathIs(pathname, "/public")
+  );
+}
+
+/**
+ * Runtime read. `next build` inlines `process.env.AE_WRITES_FROZEN` from the
+ * image build, which does not set the flag. The operator turns it on later,
+ * in the same step as stopping the cron sidecar, without rebuilding.
+ */
+export function aeWritesFrozen(): boolean {
+  return process.env["AE_WRITES_FROZEN"] === "1";
+}
+
+/** True when this request must 503. Login, other GETs, and static assets do not. */
+export function requestBlockedByWriteFreeze(method: string, pathname: string): boolean {
+  if (!aeWritesFrozen()) return false;
+  if (isLoginPath(pathname) || isStaticAssetPath(pathname)) return false;
+  const normalized = method.toUpperCase();
+  if (normalized === "GET" && WRITE_CRON_GETS.some((p) => pathIs(pathname, p))) return true;
+  return normalized !== "GET";
+}
+
+function frozenWritesResponse(): NextResponse {
+  return NextResponse.json(
+    { error: "AE writes are frozen" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  if (requestBlockedByWriteFreeze(req.method, pathname)) {
+    return frozenWritesResponse();
+  }
 
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return NextResponse.next();
 
