@@ -26,7 +26,18 @@ export const maxDuration = 600;
 
 const SIX_DAYS_MS = 6 * 24 * 3600 * 1000;
 
+function frozenWritesResponse() {
+  return NextResponse.json(
+    { error: "AE writes are frozen" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 export async function GET(req: Request) {
+  // This GET updates weeklyBriefLastSentAt and sends mail. Refuse before any read or write.
+  // Bracket access so the runtime flag is not inlined at image build.
+  if (process.env["AE_WRITES_FROZEN"] === "1") return frozenWritesResponse();
+
   const expected = process.env.CRON_SECRET;
   if (expected) {
     const auth = req.headers.get("authorization") ?? "";

@@ -24,7 +24,18 @@ import { nextRunAfter, type Cadence } from "@/lib/quizSchedule";
 export const runtime = "nodejs";
 export const maxDuration = 300; // up to 5 min for a batch
 
+function frozenWritesResponse() {
+  return NextResponse.json(
+    { error: "AE writes are frozen" },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 export async function GET(req: Request) {
+  // This GET inserts AdHocQuiz rows. Refuse before any read or insert.
+  // Bracket access so the runtime flag is not inlined at image build.
+  if (process.env["AE_WRITES_FROZEN"] === "1") return frozenWritesResponse();
+
   // Auth: shared secret. Cron sidecar passes it as Authorization: Bearer ...
   const expected = process.env.CRON_SECRET;
   if (expected) {
